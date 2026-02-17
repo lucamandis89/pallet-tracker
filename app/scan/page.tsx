@@ -2,142 +2,137 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Html5Qrcode } from "html5-qrcode";
+import {
+  Html5QrcodeScanner,
+  Html5QrcodeScanType,
+} from "html5-qrcode";
 
 export default function ScanPage() {
   const [status, setStatus] = useState("📷 Inquadra il QR della pedana");
   const [result, setResult] = useState<string | null>(null);
-
-  const qrRef = useRef<Html5Qrcode | null>(null);
-  const isRunningRef = useRef(false);
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   useEffect(() => {
-    const startScanner = async () => {
-      try {
-        const qrRegionId = "qr-reader";
+    const qrRegionId = "qr-reader";
 
-        if (!qrRef.current) {
-          qrRef.current = new Html5Qrcode(qrRegionId);
-        }
+    // Evita doppio mount in dev / refresh
+    if (scannerRef.current) return;
 
-        if (isRunningRef.current) return;
+    setStatus("📷 Avvio fotocamera...");
 
-        setStatus("📷 Avvio fotocamera...");
-        isRunningRef.current = true;
+    const scanner = new Html5QrcodeScanner(
+      qrRegionId,
+      {
+        fps: 15,
+        qrbox: { width: 300, height: 300 },
+        rememberLastUsedCamera: true,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
 
-        await qrRef.current.start(
-          { facingMode: "environment" }, // FORZA CAMERA POSTERIORE
-          {
-            fps: 15,
-            qrbox: { width: 260, height: 260 },
-            disableFlip: true,
-          },
-          async (decodedText) => {
-            setResult(decodedText);
-            setStatus("✅ QR letto: " + decodedText);
+        // ⭐️ Questo è IL boost su Android (usa il detector nativo se disponibile)
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
 
-            // Ferma scanner subito dopo lettura
-            if (qrRef.current && isRunningRef.current) {
-              isRunningRef.current = false;
-              await qrRef.current.stop();
-              await qrRef.current.clear();
-            }
-          },
-          () => {}
-        );
+        // Forza camera posteriore
+        videoConstraints: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          // Alcuni device accettano advanced:
+          advanced: [{ focusMode: "continuous" } as any],
+        } as any,
+      },
+      false
+    );
 
-        setStatus("📷 Inquadra il QR della pedana");
-      } catch (err) {
-        console.error(err);
-        setStatus("❌ Errore fotocamera. Permessi negati o browser non supportato.");
-        isRunningRef.current = false;
+    scannerRef.current = scanner;
+
+    scanner.render(
+      async (decodedText) => {
+        setResult(decodedText);
+        setStatus("✅ QR letto: " + decodedText);
+
+        // Ferma e rimuovi UI scanner
+        try {
+          await scanner.clear();
+        } catch {}
+      },
+      () => {
+        // ignora errori continui di scan (normale)
       }
-    };
+    );
 
-    startScanner();
+    setStatus("📷 Inquadra il QR della pedana");
 
     return () => {
-      const stopScanner = async () => {
+      (async () => {
         try {
-          if (qrRef.current && isRunningRef.current) {
-            isRunningRef.current = false;
-            await qrRef.current.stop();
-            await qrRef.current.clear();
-          }
-        } catch (err) {
-          console.log("Stop scanner error:", err);
-        }
-      };
-
-      stopScanner();
+          await scanner.clear();
+        } catch {}
+      })();
+      scannerRef.current = null;
     };
   }, []);
 
-  const restartScanner = async () => {
-    try {
-      setResult(null);
-      setStatus("🔄 Riavvio scanner...");
+  const reset = async () => {
+    setResult(null);
+    setStatus("🔄 Riavvio...");
 
-      if (qrRef.current) {
-        try {
-          await qrRef.current.stop();
-          await qrRef.current.clear();
-        } catch {}
-      }
-
-      qrRef.current = new Html5Qrcode("qr-reader");
-      isRunningRef.current = false;
-
-      window.location.reload();
-    } catch (err) {
-      console.error(err);
+    if (scannerRef.current) {
+      try {
+        await scannerRef.current.clear();
+      } catch {}
+      scannerRef.current = null;
     }
+
+    // ricarica pulita
+    window.location.reload();
   };
 
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
-      <h1 style={{ fontSize: "26px", fontWeight: "bold" }}>
-        📷 Scanner QR Pedane
-      </h1>
+    <div style={{ padding: 20, fontFamily: "Arial, sans-serif" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h1 style={{ fontSize: 26, fontWeight: "bold" }}>📷 Scanner QR Pedane</h1>
+        <Link href="/" style={{ textDecoration: "none", fontWeight: "bold" }}>← Home</Link>
+      </div>
 
-      <p style={{ marginTop: "10px", fontSize: "16px" }}>
+      <p style={{ marginTop: 10, fontSize: 16 }}>
         Scansiona il QR della pedana. La posizione GPS verrà salvata automaticamente.
       </p>
 
       <div
         style={{
-          marginTop: "15px",
-          padding: "12px",
+          marginTop: 15,
+          padding: 12,
           background: "#f4f4f4",
-          borderRadius: "10px",
-          fontSize: "16px",
+          borderRadius: 10,
+          fontSize: 16,
           fontWeight: "bold",
         }}
       >
         Stato: {status}
       </div>
 
-      <div style={{ marginTop: "20px" }}>
+      <div style={{ marginTop: 20 }}>
         <div
           id="qr-reader"
           style={{
             width: "100%",
-            maxWidth: "420px",
-            borderRadius: "12px",
+            maxWidth: 420,
+            borderRadius: 12,
             overflow: "hidden",
             border: "2px solid #ddd",
+            margin: "0 auto",
           }}
-        ></div>
+        />
       </div>
 
       {result && (
         <div
           style={{
-            marginTop: "20px",
-            padding: "12px",
+            marginTop: 20,
+            padding: 12,
             background: "#d4edda",
-            borderRadius: "10px",
-            fontSize: "16px",
+            borderRadius: 10,
+            fontSize: 16,
             fontWeight: "bold",
             color: "#155724",
           }}
@@ -146,17 +141,17 @@ export default function ScanPage() {
         </div>
       )}
 
-      <div style={{ marginTop: "20px", display: "flex", gap: "10px" }}>
+      <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
         <button
-          onClick={restartScanner}
+          onClick={reset}
           style={{
             flex: 1,
-            padding: "15px",
-            borderRadius: "12px",
+            padding: 15,
+            borderRadius: 12,
             border: "none",
             background: "#ff3b30",
             color: "white",
-            fontSize: "18px",
+            fontSize: 18,
             fontWeight: "bold",
           }}
         >
@@ -168,11 +163,11 @@ export default function ScanPage() {
           style={{
             flex: 1,
             textAlign: "center",
-            padding: "15px",
-            borderRadius: "12px",
+            padding: 15,
+            borderRadius: 12,
             background: "#007aff",
             color: "white",
-            fontSize: "18px",
+            fontSize: 18,
             fontWeight: "bold",
             textDecoration: "none",
           }}
