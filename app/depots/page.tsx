@@ -1,90 +1,60 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { addDepot, getDefaultDepot, getDepots, removeDepot, updateDepot, DepotItem } from "../lib/storage";
+import { addDepot, getDepots, removeDepot, updateDepot } from "../lib/storage";
 
 export default function DepotsPage() {
-  const [list, setList] = useState<DepotItem[]>(() => getDepots());
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
-  const [notes, setNotes] = useState("");
-  const [q, setQ] = useState("");
-
-  const defaultDepot = getDefaultDepot();
-
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return list;
-    return list.filter((x) => `${x.name} ${x.address || ""} ${x.notes || ""}`.toLowerCase().includes(s));
-  }, [list, q]);
-
-  function refresh() {
-    setList(getDepots());
-  }
+  const [refresh, setRefresh] = useState(0);
+  const list = useMemo(() => getDepots(), [refresh]);
 
   function add() {
-    const n = name.trim();
-    if (!n) return alert("Inserisci il nome deposito.");
-    addDepot({ name: n, address: address.trim() || undefined, notes: notes.trim() || undefined });
-    setName("");
-    setAddress("");
-    setNotes("");
-    refresh();
+    const name = prompt("Nome deposito:");
+    if (!name?.trim()) return;
+    const address = prompt("Indirizzo (opz.)") || "";
+    const note = prompt("Note (opz.)") || "";
+    addDepot(name.trim(), address.trim() || undefined, note.trim() || undefined);
+    setRefresh((x) => x + 1);
   }
 
-  function edit(it: DepotItem) {
-    const n = prompt("Nome deposito:", it.name);
-    if (n === null) return;
-    const a = prompt("Indirizzo:", it.address || "") ?? "";
-    const no = prompt("Note:", it.notes || "") ?? "";
-    updateDepot(it.id, { name: n.trim() || it.name, address: a.trim() || undefined, notes: no.trim() || undefined });
-    refresh();
+  function edit(id: string) {
+    const d = list.find((x) => x.id === id);
+    if (!d) return;
+    const name = prompt("Nome:", d.name) ?? d.name;
+    const address = prompt("Indirizzo:", d.address || "") ?? (d.address || "");
+    const note = prompt("Note:", d.note || "") ?? (d.note || "");
+    updateDepot(id, { name: name.trim(), address: address.trim() || undefined, note: note.trim() || undefined });
+    setRefresh((x) => x + 1);
   }
 
-  function del(it: DepotItem) {
-    if (!confirm(`Eliminare "${it.name}"?`)) return;
-    removeDepot(it.id);
-    refresh();
+  function del(id: string) {
+    if (!confirm("Eliminare deposito? (se è l’ultimo non si può)")) return;
+    removeDepot(id);
+    setRefresh((x) => x + 1);
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 860, margin: "0 auto" }}>
+    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>🏭 Depositi</h1>
-      <a href="/" style={{ fontWeight: 900, textDecoration: "none" }}>← Home</a>
-
-      <div style={box()}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>✅ Deposito default sempre presente</div>
-        <div style={card()}>
-          <div style={{ fontWeight: 900 }}>{defaultDepot.name}</div>
-          <div style={{ opacity: 0.75 }}>Non eliminabile • utile per demo/inizio</div>
-        </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <a href="/" style={link()}>← Home</a>
+        <button style={btn("#fb8c00")} onClick={add}>+ Aggiungi deposito</button>
+        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
       </div>
 
       <div style={box()}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Aggiungi deposito</div>
+        <div style={{ opacity: 0.8, marginBottom: 10 }}>
+          Nota: non puoi eliminare l’ultimo deposito (serve come fallback).
+        </div>
         <div style={{ display: "grid", gap: 10 }}>
-          <input style={inp()} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome deposito" />
-          <input style={inp()} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Indirizzo (opz.)" />
-          <input style={inp()} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Note (opz.)" />
-          <button style={btn("#fb8c00")} onClick={add}>Salva</button>
-        </div>
-      </div>
-
-      <div style={box()}>
-        <div style={{ fontWeight: 900 }}>📋 Elenco</div>
-        <input style={{ ...inp(), marginTop: 10 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca..." />
-
-        <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-          {filtered.length === 0 ? <div style={{ opacity: 0.7 }}>Nessun deposito inserito.</div> : null}
-          {filtered.map((x) => (
-            <div key={x.id} style={card()}>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>{x.name}</div>
+          {list.map((d) => (
+            <div key={d.id} style={card()}>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>{d.name}</div>
               <div style={{ opacity: 0.85 }}>
-                {x.address ? `📍 ${x.address}` : "📍 —"} {x.notes ? ` • 📝 ${x.notes}` : ""}
+                {d.address ? `📍 ${d.address}` : "📍 (nessun indirizzo)"} {d.note ? ` • 📝 ${d.note}` : ""}
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button style={btn("#1565c0")} onClick={() => edit(x)}>Modifica</button>
-                <button style={btn("#e53935")} onClick={() => del(x)}>Elimina</button>
+              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                <button style={btn("#455a64")} onClick={() => edit(d.id)}>Modifica</button>
+                <button style={btn("#e53935")} onClick={() => del(d.id)}>Elimina</button>
               </div>
             </div>
           ))}
@@ -95,6 +65,6 @@ export default function DepotsPage() {
 }
 
 const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const inp = (): React.CSSProperties => ({ padding: 12, borderRadius: 12, border: "1px solid #ddd", fontSize: 16, width: "100%" });
+const card = (): React.CSSProperties => ({ padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fafafa" });
 const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
-const card = (): React.CSSProperties => ({ padding: 14, borderRadius: 14, border: "1px solid #eee", display: "grid", gap: 8 });
+const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
