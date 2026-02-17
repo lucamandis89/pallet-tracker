@@ -1,5 +1,4 @@
-"use client";
-
+// app/page.tsx
 export default function HomePage() {
   const btnStyle = (bg: string) => ({
     width: "100%",
@@ -32,7 +31,9 @@ export default function HomePage() {
         <div style={{ fontSize: 38 }}>📦</div>
         <div>
           <h1 style={{ margin: 0, fontSize: 34 }}>Pallet Tracker</h1>
-          <div style={{ opacity: 0.8, fontWeight: 700 }}>Gestione pedane e tracking con QR + GPS.</div>
+          <div style={{ opacity: 0.8, fontWeight: 700 }}>
+            Gestione pedane e tracking con QR + GPS in tempo reale.
+          </div>
         </div>
       </div>
 
@@ -40,22 +41,31 @@ export default function HomePage() {
         <a href="/scan" style={btnStyle("#0b1220")}>📷 Scansiona QR Pedana</a>
         <a href="/pallets" style={btnStyle("#2e7d32")}>🧱 Registro Pedane</a>
         <a href="/stock" style={btnStyle("#6a1b9a")}>📦 Giacenze (Stock)</a>
+        <a href="/missing" style={btnStyle("#e53935")}>🚨 Pedane Mancanti</a>
         <a href="/drivers" style={btnStyle("#1e88e5")}>🚚 Gestione Autisti</a>
         <a href="/shops" style={btnStyle("#1b9a4a")}>🏪 Gestione Negozi</a>
         <a href="/depots" style={btnStyle("#fb8c00")}>🏭 Depositi</a>
-        <a href="/history" style={btnStyle("#6a1b9a")}>📌 Storico Scansioni</a>
-        <a href="/missing" style={btnStyle("#e53935")}>🚨 Pedane Mancanti</a>
+        <a href="/history" style={btnStyle("#4a148c")}>📌 Storico Scansioni</a>
       </div>
 
       <div style={cardStyle}>
-        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>✅ Moduli pronti:</div>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
+          ✅ Funzioni attive:
+        </div>
         <div style={{ lineHeight: 1.6 }}>
-          ✅ Scansione QR + inserimento manuale se QR rovinato<br />
-          ✅ Salvataggio GPS + Storico scansioni (Export CSV)<br />
-          ✅ Registro pedane (tipo, note, posizione, stato)<br />
-          ✅ Stock per negozio/deposito/autista + movimenti (Export CSV)<br />
-          ✅ Anagrafiche: autisti, negozi, depositi<br />
-          ✅ Pedane mancanti (flag + lista)
+          ✅ Scansione QR + inserimento manuale (QR rovinato)
+          <br />
+          ✅ Salvataggio GPS (se disponibile)
+          <br />
+          ✅ Registro pedane + posizione attuale
+          <br />
+          ✅ Stock (raggruppato per luogo)
+          <br />
+          ✅ Mancanti + risolte
+          <br />
+          ✅ Autisti / Negozi / Depositi
+          <br />
+          ✅ Storico + Export CSV
         </div>
       </div>
     </div>
