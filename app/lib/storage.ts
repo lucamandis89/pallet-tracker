@@ -1,101 +1,316 @@
-// app/lib/storage.ts
-// Storage unico per tutta l'app (localStorage) — safe per Next/Vercel
+"use client";
 
-export type PalletItem = {
+/* =========================================================
+   STORAGE CENTRALIZZATO - Pallet Tracker
+   Tutti i dati vengono salvati in localStorage.
+   ========================================================= */
+
+export type StockLocationKind = "NEGOZIO" | "DEPOSITO" | "AUTISTA";
+
+export type Driver = {
   id: string;
-  code: string;
-  type?: string;
-  altCode?: string;
-  notes?: string;
-
-  createdTs?: number;
-
-  // ultimi dati di tracking (da Scan)
-  lastSeenTs?: number;
-  lastLat?: number;
-  lastLng?: number;
-  lastSource?: "qr" | "manual";
+  name: string;
+  phone?: string;
 };
 
-const KEY_PALLETS = "pallet_tracker_pallets";
+export type Shop = {
+  id: string;
+  name: string;
+  address?: string;
+};
 
-// ---- helpers ----
-function hasLocalStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
+export type Depot = {
+  id: string;
+  name: string;
+  address?: string;
+};
 
-function safeParse<T>(raw: string | null, fallback: T): T {
-  if (!raw) return fallback;
+export type PalletItem = {
+  id: string;          // codice principale (PEDANA-xxx)
+  type: string;        // tipo pallet (EPAL, CHEP, IFCO, ecc.)
+  altCode?: string;    // codice alternativo
+  note?: string;
+  createdAt: number;
+};
+
+export type ScanHistoryItem = {
+  id: string;
+  palletCode: string;
+  ts: number;
+  lat?: number;
+  lng?: number;
+  note?: string;
+};
+
+export type StockMove = {
+  id: string;
+  ts: number;
+  palletType: string;
+  qty: number;
+  from: { kind: StockLocationKind; id: string };
+  to: { kind: StockLocationKind; id: string };
+  note?: string;
+};
+
+export type StockRow = {
+  palletType: string;
+  qty: number;
+  locationKind: StockLocationKind;
+  locationId: string;
+};
+
+/* =========================
+   KEY STORAGE
+========================= */
+
+const KEY_DRIVERS = "pt_drivers";
+const KEY_SHOPS = "pt_shops";
+const KEY_DEPOTS = "pt_depots";
+const KEY_PALLETS = "pt_pallets";
+const KEY_SCAN_HISTORY = "pt_scan_history";
+const KEY_STOCK_MOVES = "pt_stock_moves";
+
+/* =========================
+   FUNZIONI BASE
+========================= */
+
+function safeParse<T>(value: string | null, fallback: T): T {
   try {
-    return JSON.parse(raw) as T;
+    if (!value) return fallback;
+    return JSON.parse(value) as T;
   } catch {
     return fallback;
   }
 }
 
-function uid() {
-  // id semplice e robusto
-  return `p_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+function save(key: string, data: any) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(key, JSON.stringify(data));
 }
 
-// ---- pallets CRUD ----
+function load<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  return safeParse<T>(localStorage.getItem(key), fallback);
+}
+
+function uid(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+/* =========================
+   FORMATTING
+========================= */
+
+export function formatDT(ts: number) {
+  const d = new Date(ts);
+  return d.toLocaleString("it-IT");
+}
+
+/* =========================
+   CSV EXPORT
+========================= */
+
+export function downloadCsv(filename: string, headers: string[], rows: any[][]) {
+  const csv = [
+    headers.join(";"),
+    ...rows.map((r) =>
+      r
+        .map((cell) => {
+          const s = String(cell ?? "");
+          return `"${s.replace(/"/g, '""')}"`;
+        })
+        .join(";")
+    ),
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  URL.revokeObjectURL(url);
+}
+
+/* =========================
+   AUTISTI
+========================= */
+
+export function getDrivers(): Driver[] {
+  return load<Driver[]>(KEY_DRIVERS, []);
+}
+
+export function addDriver(name: string, phone?: string) {
+  const list = getDrivers();
+  list.push({ id: uid("DRV"), name, phone });
+  save(KEY_DRIVERS, list);
+}
+
+export function deleteDriver(id: string) {
+  const list = getDrivers().filter((d) => d.id !== id);
+  save(KEY_DRIVERS, list);
+}
+
+/* =========================
+   NEGOZI
+========================= */
+
+export function getShopOptions(): Shop[] {
+  return load<Shop[]>(KEY_SHOPS, []);
+}
+
+export function addShop(name: string, address?: string) {
+  const list = getShopOptions();
+  list.push({ id: uid("SHOP"), name, address });
+  save(KEY_SHOPS, list);
+}
+
+export function deleteShop(id: string) {
+  const list = getShopOptions().filter((s) => s.id !== id);
+  save(KEY_SHOPS, list);
+}
+
+/* =========================
+   DEPOSITI
+========================= */
+
+export function getDepotOptions(): Depot[] {
+  return load<Depot[]>(KEY_DEPOTS, []);
+}
+
+export function addDepot(name: string, address?: string) {
+  const list = getDepotOptions();
+  list.push({ id: uid("DEP"), name, address });
+  save(KEY_DEPOTS, list);
+}
+
+export function deleteDepot(id: string) {
+  const list = getDepotOptions().filter((d) => d.id !== id);
+  save(KEY_DEPOTS, list);
+}
+
+/* =========================
+   REGISTRO PEDANE
+========================= */
+
 export function getPallets(): PalletItem[] {
-  if (!hasLocalStorage()) return [];
-  return safeParse<PalletItem[]>(window.localStorage.getItem(KEY_PALLETS), []);
+  return load<PalletItem[]>(KEY_PALLETS, []);
 }
 
-export function setPallets(list: PalletItem[]) {
-  if (!hasLocalStorage()) return;
-  window.localStorage.setItem(KEY_PALLETS, JSON.stringify(list || []));
+export function addPallet(id: string, type: string, altCode?: string, note?: string) {
+  const list = getPallets();
+
+  // evita duplicati
+  const exists = list.find((p) => p.id === id);
+  if (exists) return;
+
+  list.push({
+    id,
+    type,
+    altCode,
+    note,
+    createdAt: Date.now(),
+  });
+
+  save(KEY_PALLETS, list);
 }
 
-export function upsertPallet(input: Partial<PalletItem> & { code: string }) {
-  const all = getPallets();
-  const code = (input.code || "").trim();
-  if (!code) return;
+export function updatePallet(id: string, patch: Partial<PalletItem>) {
+  const list = getPallets();
+  const idx = list.findIndex((p) => p.id === id);
+  if (idx === -1) return;
 
-  // match per id (se presente) oppure per code (case-insensitive)
-  const idx =
-    (input.id ? all.findIndex((x) => x.id === input.id) : -1) >= 0
-      ? all.findIndex((x) => x.id === input.id)
-      : all.findIndex((x) => (x.code || "").toLowerCase() === code.toLowerCase());
-
-  const now = Date.now();
-
-  if (idx >= 0) {
-    const prev = all[idx];
-
-    const updated: PalletItem = {
-      ...prev,
-      ...input,
-      code,
-      // non sovrascrivere createdTs se esiste già
-      createdTs: prev.createdTs || input.createdTs || now,
-    };
-
-    // se arrivano dati "ultimo visto" li manteniamo
-    all[idx] = updated;
-  } else {
-    const created: PalletItem = {
-      id: input.id || uid(),
-      code,
-      type: input.type,
-      altCode: input.altCode,
-      notes: input.notes,
-      createdTs: input.createdTs || now,
-      lastSeenTs: input.lastSeenTs,
-      lastLat: input.lastLat,
-      lastLng: input.lastLng,
-      lastSource: input.lastSource,
-    };
-    all.push(created);
-  }
-
-  setPallets(all);
+  list[idx] = { ...list[idx], ...patch };
+  save(KEY_PALLETS, list);
 }
 
 export function deletePallet(id: string) {
-  const all = getPallets();
-  const next = all.filter((x) => x.id !== id);
-  setPallets(next);
+  const list = getPallets().filter((p) => p.id !== id);
+  save(KEY_PALLETS, list);
+}
+
+/* =========================
+   SCANSIONI (HISTORY)
+========================= */
+
+export function getScanHistory(): ScanHistoryItem[] {
+  return load<ScanHistoryItem[]>(KEY_SCAN_HISTORY, []);
+}
+
+export function addScanHistory(palletCode: string, lat?: number, lng?: number, note?: string) {
+  const list = getScanHistory();
+
+  list.unshift({
+    id: uid("HIS"),
+    palletCode,
+    ts: Date.now(),
+    lat,
+    lng,
+    note,
+  });
+
+  save(KEY_SCAN_HISTORY, list);
+}
+
+export function clearScanHistory() {
+  save(KEY_SCAN_HISTORY, []);
+}
+
+/* =========================
+   STOCK MOVES (MOVIMENTI)
+========================= */
+
+export function getStockMoves(): StockMove[] {
+  return load<StockMove[]>(KEY_STOCK_MOVES, []);
+}
+
+export function addStockMove(move: Omit<StockMove, "id">) {
+  const list = getStockMoves();
+
+  list.unshift({
+    ...move,
+    id: uid("MOVE"),
+  });
+
+  save(KEY_STOCK_MOVES, list);
+}
+
+/* =========================
+   CALCOLO GIACENZE
+========================= */
+
+export function getStockRows(): StockRow[] {
+  const moves = getStockMoves();
+  const map = new Map<string, number>();
+
+  // chiave = palletType|kind|id
+  function key(t: string, kind: StockLocationKind, id: string) {
+    return `${t}|${kind}|${id}`;
+  }
+
+  for (const m of moves) {
+    const fromKey = key(m.palletType, m.from.kind, m.from.id);
+    const toKey = key(m.palletType, m.to.kind, m.to.id);
+
+    map.set(fromKey, (map.get(fromKey) || 0) - (m.qty || 0));
+    map.set(toKey, (map.get(toKey) || 0) + (m.qty || 0));
+  }
+
+  const rows: StockRow[] = [];
+  for (const [k, qty] of map.entries()) {
+    const [palletType, kind, id] = k.split("|");
+    rows.push({
+      palletType,
+      qty,
+      locationKind: kind as StockLocationKind,
+      locationId: id,
+    });
+  }
+
+  // filtro righe vuote
+  return rows.filter((r) => (r.qty ?? 0) !== 0);
 }
