@@ -2,107 +2,216 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
-import Link from "next/link";
 
 export default function ScanPage() {
-  const qrRef = useRef<Html5Qrcode | null>(null);
-  const startedRef = useRef(false);
-
   const [status, setStatus] = useState("📷 Inquadra il QR della pedana");
-  const [result, setResult] = useState<string>("");
-  const [debug, setDebug] = useState<string>("");
+  const [scanning, setScanning] = useState(false);
+  const [lastQr, setLastQr] = useState<string | null>(null);
+
+  const qrRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-
-    const id = "reader";
-    const qr = new Html5Qrcode(id);
-    qrRef.current = qr;
-
-    (async () => {
-      try {
-        setStatus("⏳ Avvio fotocamera...");
-        await qr.start(
-          { facingMode: "environment" },
-          {
-            fps: 12,
-            qrbox: { width: 260, height: 260 },
-            // IMPORTANTISSIMO su Android: usa BarcodeDetector se c'è
-            experimentalFeatures: {
-              useBarCodeDetectorIfSupported: true,
-            },
-            // prova a dare più qualità al video
-            videoConstraints: {
-              facingMode: "environment",
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-          },
-          (decodedText) => {
-            setResult(decodedText);
-            setStatus("✅ QR letto!");
-            // ferma dopo lettura
-            qr.stop().catch(() => {});
-          },
-          (err) => {
-            // non spammare: salva solo ogni tanto
-            if (typeof err === "string" && err.toLowerCase().includes("no qr")) return;
-            setDebug(String(err).slice(0, 200));
-          }
-        );
-
-        setStatus("📷 Inquadra il QR della pedana (prova più vicino e senza riflessi)");
-      } catch (e: any) {
-        setStatus("❌ Errore avvio camera");
-        setDebug(e?.message ? String(e.message) : String(e));
-      }
-    })();
-
     return () => {
-      qrRef.current?.stop().catch(() => {});
-      qrRef.current?.clear().catch(() => {});
-      qrRef.current = null;
-      startedRef.current = false;
+      if (qrRef.current) {
+        qrRef.current.stop().catch(() => {});
+        qrRef.current.clear().catch(() => {});
+      }
     };
   }, []);
 
-  return (
-    <div style={{ padding: 16, fontFamily: "Arial" }}>
-      <h1>📷 Scanner QR Pedane</h1>
-      <p>Scansiona il QR della pedana. La posizione GPS verrà salvata automaticamente.</p>
+  const startScan = async () => {
+    if (scanning) return;
 
-      <div style={{ background: "#f2f2f2", padding: 12, borderRadius: 10, marginBottom: 12 }}>
+    setStatus("📷 Avvio fotocamera...");
+    setScanning(true);
+
+    try {
+      if (!qrRef.current) {
+        qrRef.current = new Html5Qrcode("reader");
+      }
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 260, height: 260 },
+      };
+
+      await qrRef.current.start(
+        { facingMode: "environment" },
+        config,
+        async (decodedText) => {
+          if (!decodedText) return;
+
+          setLastQr(decodedText);
+          setStatus(`✅ QR letto: ${decodedText}`);
+
+          // prova a salvare posizione GPS
+          if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+
+                const data = {
+                  qr: decodedText,
+                  lat,
+                  lon,
+                  timestamp: new Date().toISOString(),
+                };
+
+                console.log("POSIZIONE SALVATA:", data);
+
+                setStatus(
+                  `✅ QR letto: ${decodedText}\n📍 GPS salvato: ${lat.toFixed(
+                    6
+                  )}, ${lon.toFixed(6)}`
+                );
+              },
+              () => {
+                setStatus(`✅ QR letto: ${decodedText}\n⚠️ GPS non disponibile`);
+              }
+            );
+          } else {
+            setStatus(`✅ QR letto: ${decodedText}\n⚠️ GPS non supportato`);
+          }
+        },
+        () => {}
+      );
+    } catch (err) {
+      console.error(err);
+      setStatus("❌ Errore avvio scanner. Controlla permessi fotocamera.");
+      setScanning(false);
+    }
+  };
+
+  const stopScan = async () => {
+    try {
+      if (qrRef.current) {
+        await qrRef.current.stop();
+        await qrRef.current.clear();
+      }
+    } catch (err) {
+      console.log(err);
+    }
+
+    setScanning(false);
+    setStatus("🛑 Scanner fermato");
+  };
+
+  const reset = () => {
+    setLastQr(null);
+    setStatus("📷 Inquadra il QR della pedana");
+  };
+
+  return (
+    <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
+      <h1 style={{ fontSize: "28px", fontWeight: "bold" }}>
+        📷 Scanner QR Pedane
+      </h1>
+
+      <p style={{ fontSize: "18px" }}>
+        Scansiona il QR della pedana. La posizione GPS verrà salvata
+        automaticamente.
+      </p>
+
+      <div
+        style={{
+          background: "#f1f5f9",
+          padding: "15px",
+          borderRadius: "12px",
+          marginTop: "15px",
+          fontSize: "18px",
+          whiteSpace: "pre-line",
+        }}
+      >
         <b>Stato:</b> {status}
+      </div>
+
+      <div style={{ marginTop: "20px" }}>
+        <button
+          onClick={startScan}
+          disabled={scanning}
+          style={{
+            padding: "14px 20px",
+            fontSize: "18px",
+            borderRadius: "12px",
+            border: "none",
+            background: scanning ? "#94a3b8" : "#16a34a",
+            color: "white",
+            cursor: scanning ? "not-allowed" : "pointer",
+            marginRight: "10px",
+          }}
+        >
+          ▶ Avvia Scanner
+        </button>
+
+        <button
+          onClick={stopScan}
+          style={{
+            padding: "14px 20px",
+            fontSize: "18px",
+            borderRadius: "12px",
+            border: "none",
+            background: "#dc2626",
+            color: "white",
+            cursor: "pointer",
+            marginRight: "10px",
+          }}
+        >
+          ⛔ Ferma
+        </button>
+
+        <button
+          onClick={reset}
+          style={{
+            padding: "14px 20px",
+            fontSize: "18px",
+            borderRadius: "12px",
+            border: "none",
+            background: "#2563eb",
+            color: "white",
+            cursor: "pointer",
+          }}
+        >
+          🔄 Reset
+        </button>
       </div>
 
       <div
         id="reader"
         style={{
           width: "100%",
-          maxWidth: 420,
-          margin: "0 auto",
-          borderRadius: 16,
+          maxWidth: "500px",
+          marginTop: "25px",
+          borderRadius: "12px",
           overflow: "hidden",
         }}
-      />
+      ></div>
 
-      {result && (
-        <div style={{ marginTop: 14, background: "#d4edda", padding: 12, borderRadius: 10 }}>
-          <b>QR:</b> <div style={{ fontSize: 18, fontWeight: 700 }}>{result}</div>
+      {lastQr && (
+        <div
+          style={{
+            marginTop: "20px",
+            padding: "15px",
+            borderRadius: "12px",
+            background: "#e0f2fe",
+            fontSize: "18px",
+          }}
+        >
+          <b>Ultimo QR letto:</b> {lastQr}
         </div>
       )}
 
-      {debug && (
-        <div style={{ marginTop: 10, background: "#fff3cd", padding: 10, borderRadius: 10 }}>
-          <b>Debug:</b> {debug}
-        </div>
-      )}
-
-      <div style={{ marginTop: 18 }}>
-        <Link href="/" style={{ color: "blue", textDecoration: "none" }}>
+      <div style={{ marginTop: "25px" }}>
+        <a
+          href="/"
+          style={{
+            fontSize: "18px",
+            color: "#2563eb",
+            textDecoration: "none",
+          }}
+        >
           ← Torna alla Home
-        </Link>
+        </a>
       </div>
     </div>
   );
