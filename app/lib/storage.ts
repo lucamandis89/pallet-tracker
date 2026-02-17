@@ -37,6 +37,18 @@ export type DriverItem = {
   createdAt: number;
 };
 
+export type ShopItem = {
+  id: string;
+  name: string;
+  code?: string;
+  phone?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  notes?: string;
+  createdAt: number;
+};
+
 /* ============================
    LOCAL STORAGE KEYS
 ============================ */
@@ -45,6 +57,7 @@ const KEY_HISTORY = "pt_history_v1";
 const KEY_PALLETS = "pt_pallets_v1";
 const KEY_LASTSCAN = "pt_lastscan_v1";
 const KEY_DRIVERS = "pt_drivers_v1";
+const KEY_SHOPS = "pt_shops_v1";
 
 /* ============================
    UTILS
@@ -172,11 +185,7 @@ export function setDrivers(items: DriverItem[]) {
 
 export function addDriver(data: Omit<DriverItem, "id" | "createdAt">) {
   const list = getDrivers();
-
-  // limite 10
-  if (list.length >= 10) {
-    throw new Error("LIMIT_10");
-  }
+  if (list.length >= 10) throw new Error("LIMIT_10");
 
   const item: DriverItem = {
     id: uid("drv"),
@@ -199,6 +208,46 @@ export function updateDriver(id: string, patch: Partial<DriverItem>) {
 }
 
 export function removeDriver(id: string) {
-  const list = getDrivers().filter((x) => x.id !== id);
-  setDrivers(list);
+  setDrivers(getDrivers().filter((x) => x.id !== id));
+}
+
+/* ============================
+   SHOPS (NEGOZI)
+============================ */
+
+export function getShops(): ShopItem[] {
+  if (typeof window === "undefined") return [];
+  return safeParse<ShopItem[]>(localStorage.getItem(KEY_SHOPS), []);
+}
+
+export function setShops(items: ShopItem[]) {
+  localStorage.setItem(KEY_SHOPS, JSON.stringify(items));
+}
+
+export function addShop(data: Omit<ShopItem, "id" | "createdAt">) {
+  const list = getShops();
+  if (list.length >= 100) throw new Error("LIMIT_100");
+
+  const item: ShopItem = {
+    id: uid("shop"),
+    createdAt: Date.now(),
+    ...data,
+  };
+
+  list.unshift(item);
+  setShops(list);
+  return item;
+}
+
+export function updateShop(id: string, patch: Partial<ShopItem>) {
+  const list = getShops();
+  const idx = list.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+
+  list[idx] = { ...list[idx], ...patch };
+  setShops(list);
+}
+
+export function removeShop(id: string) {
+  setShops(getShops().filter((x) => x.id !== id));
 }
