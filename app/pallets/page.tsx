@@ -1,199 +1,127 @@
+// app/pallets/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { downloadCsv, getLastScan, getPallets, PalletItem, setPallets, upsertPallet } from "../lib/storage";
 
-type PalletStatus = "IN_DEPOSITO" | "IN_TRANSITO" | "IN_NEGOZIO";
-
-type Pallet = {
-  id: string;
-  code: string; // QR / codice univoco
-  type: string; // EPAL, CHEP, IFCO...
-  status: PalletStatus;
-  locationLabel: string;
-  updatedAt: string;
-  createdAt: string;
-};
-
-const STORAGE_PALLETS = "pallet_registry";
-const STORAGE_TYPES = "pallet_types_v1";
-
-function uid() {
-  return Date.now().toString() + "_" + Math.random().toString(16).slice(2);
-}
-
-function safeParse<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-// Tipi predefiniti “vendibili” (coprono quasi tutto)
-const DEFAULT_TYPES = [
-  "EPAL (EUR) 1200x800",
-  "EPAL 2 1200x1000",
-  "Half pallet 800x600",
-  "Display pallet",
-  "CHEP Blue",
-  "CHEP Red",
-  "LPR",
-  "DUSS",
-  "IFCO (casse/RTI)",
-  "IPP / FSW",
+const PALLET_TYPES = [
+  "EUR / EPAL",
+  "CHEP",
   "CP (Chemical)",
-  "US Pallet 48x40",
-  "Altro…",
+  "H1 Plastica",
+  "Mezza pedana",
+  "Altro",
 ];
 
 export default function PalletsPage() {
-  const [items, setItems] = useState<Pallet[]>([]);
+  const [items, setItems] = useState<PalletItem[]>([]);
   const [q, setQ] = useState("");
 
-  // tipi (predefiniti + personalizzati)
-  const [customTypes, setCustomTypes] = useState<string[]>([]);
-  const allTypes = useMemo(() => {
-    const merged = [...DEFAULT_TYPES.filter((t) => t !== "Altro…"), ...customTypes];
-    // rimetto "Altro…" in fondo
-    return [...merged, "Altro…"];
-  }, [customTypes]);
-
-  // form
   const [code, setCode] = useState("");
-  const [typeSelect, setTypeSelect] = useState<string>("EPAL (EUR) 1200x800");
-  const [typeCustom, setTypeCustom] = useState<string>(""); // usato solo se "Altro…"
-  const [status, setStatus] = useState<PalletStatus>("IN_DEPOSITO");
-  const [locationLabel, setLocationLabel] = useState("Deposito: —");
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [altCode, setAltCode] = useState("");
+  const [type, setType] = useState<string>(PALLET_TYPES[0]);
+  const [notes, setNotes] = useState("");
+
+  const [editId, setEditId] = useState<string | null>(null);
+
+  function reload() {
+    setItems(getPallets());
+  }
 
   useEffect(() => {
-    setItems(safeParse<Pallet[]>(localStorage.getItem(STORAGE_PALLETS), []));
-    setCustomTypes(safeParse<string[]>(localStorage.getItem(STORAGE_TYPES), []));
+    reload();
+    // precompila col last scan se presente
+    const last = getLastScan();
+    if (last) setCode((prev) => prev || last);
   }, []);
-
-  function persistPallets(next: Pallet[]) {
-    setItems(next);
-    localStorage.setItem(STORAGE_PALLETS, JSON.stringify(next));
-  }
-
-  function persistTypes(next: string[]) {
-    // normalizzo: tolgo vuoti, trim, unici (case-insensitive)
-    const cleaned = next
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .filter((v, i, arr) => arr.findIndex((a) => a.toLowerCase() === v.toLowerCase()) === i);
-
-    setCustomTypes(cleaned);
-    localStorage.setItem(STORAGE_TYPES, JSON.stringify(cleaned));
-  }
-
-  function resetForm() {
-    setEditingId(null);
-    setCode("");
-    setTypeSelect("EPAL (EUR) 1200x800");
-    setTypeCustom("");
-    setStatus("IN_DEPOSITO");
-    setLocationLabel("Deposito: —");
-  }
-
-  function resolvedType(): string {
-    if (typeSelect !== "Altro…") return typeSelect.trim();
-    return typeCustom.trim();
-  }
-
-  function onSubmit() {
-    const c = code.trim();
-    if (!c) return alert("Inserisci il codice pedana (univoco).");
-
-    const t = resolvedType();
-    if (!t) return alert("Seleziona un tipo oppure inserisci un tipo personalizzato.");
-
-    // univocità codice
-    const exists = items.some((p) => p.code.toLowerCase() === c.toLowerCase() && p.id !== editingId);
-    if (exists) return alert("Codice già esistente. Deve essere univoco.");
-
-    // se tipo è custom, salvalo
-    if (typeSelect === "Altro…") {
-      persistTypes([t, ...customTypes]);
-    }
-
-    const now = new Date().toLocaleString();
-
-    if (editingId) {
-      const next = items.map((p) =>
-        p.id === editingId
-          ? { ...p, code: c, type: t, status, locationLabel: locationLabel.trim(), updatedAt: now }
-          : p
-      );
-      persistPallets(next);
-      resetForm();
-      return;
-    }
-
-    const newItem: Pallet = {
-      id: uid(),
-      code: c,
-      type: t,
-      status,
-      locationLabel: locationLabel.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    persistPallets([newItem, ...items]);
-    resetForm();
-  }
-
-  function onEdit(p: Pallet) {
-    setEditingId(p.id);
-    setCode(p.code);
-
-    // se è tra i predefiniti o custom, lo seleziono
-    const inList = allTypes.includes(p.type);
-    if (inList) {
-      setTypeSelect(p.type);
-      setTypeCustom("");
-    } else {
-      setTypeSelect("Altro…");
-      setTypeCustom(p.type);
-    }
-
-    setStatus(p.status);
-    setLocationLabel(p.locationLabel);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function onDelete(id: string) {
-    if (!confirm("Eliminare questa pedana?")) return;
-    persistPallets(items.filter((x) => x.id !== id));
-  }
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return items;
     return items.filter((p) => {
-      const hay = `${p.code} ${p.type} ${p.status} ${p.locationLabel}`.toLowerCase();
+      const hay = `${p.code} ${p.altCode || ""} ${p.type || ""} ${p.notes || ""}`.toLowerCase();
       return hay.includes(s);
     });
   }, [items, q]);
 
-  const badge = (st: PalletStatus) => {
-    const map: Record<PalletStatus, { bg: string; fg: string; label: string }> = {
-      IN_DEPOSITO: { bg: "#e8f5e9", fg: "#1b5e20", label: "In deposito" },
-      IN_TRANSITO: { bg: "#e3f2fd", fg: "#0d47a1", label: "In transito" },
-      IN_NEGOZIO: { bg: "#fff3e0", fg: "#e65100", label: "In negozio" },
-    };
-    return map[st];
-  };
+  function resetForm() {
+    setEditId(null);
+    setCode("");
+    setAltCode("");
+    setType(PALLET_TYPES[0]);
+    setNotes("");
+  }
 
-  const inputStyle: React.CSSProperties = {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #ddd",
-    width: "100%",
-    fontSize: 16,
-    background: "white",
-  };
+  function onSubmit() {
+    const c = code.trim();
+    if (!c) return alert("Inserisci un codice pedana (QR o manuale).");
+
+    // se stai editando, aggiorno l’elemento specifico
+    if (editId) {
+      const all = getPallets();
+      const idx = all.findIndex((x) => x.id === editId);
+      if (idx < 0) {
+        alert("Elemento non trovato, ricarico lista.");
+        reload();
+        return;
+      }
+      all[idx] = {
+        ...all[idx],
+        code: c,
+        altCode: altCode.trim() || undefined,
+        type: type || undefined,
+        notes: notes.trim() || undefined,
+      };
+      setPallets(all);
+      reload();
+      resetForm();
+      return;
+    }
+
+    // nuovo / upsert su code o altCode
+    upsertPallet({
+      code: c,
+      altCode: altCode.trim() || undefined,
+      type: type || undefined,
+      notes: notes.trim() || undefined,
+    });
+    reload();
+    resetForm();
+  }
+
+  function onEdit(p: PalletItem) {
+    setEditId(p.id);
+    setCode(p.code || "");
+    setAltCode(p.altCode || "");
+    setType(p.type || PALLET_TYPES[0]);
+    setNotes(p.notes || "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function onDelete(id: string) {
+    if (!confirm("Eliminare questa pedana dal registro?")) return;
+    const all = getPallets().filter((x) => x.id !== id);
+    setPallets(all);
+    reload();
+  }
+
+  function exportCsv() {
+    const all = getPallets();
+    downloadCsv(
+      "registro_pedane.csv",
+      ["code", "altCode", "type", "notes", "lastSeen", "lat", "lng", "source"],
+      all.map((p) => [
+        p.code,
+        p.altCode || "",
+        p.type || "",
+        p.notes || "",
+        p.lastSeenTs ? new Date(p.lastSeenTs).toISOString() : "",
+        p.lastLat ?? "",
+        p.lastLng ?? "",
+        p.lastSource || "",
+      ])
+    );
+  }
 
   const btn = (bg: string) => ({
     padding: "12px 14px",
@@ -205,131 +133,159 @@ export default function PalletsPage() {
     color: "white",
   });
 
+  const input = {
+    padding: 12,
+    borderRadius: 12,
+    border: "1px solid #ddd",
+    fontWeight: 700 as const,
+    width: "100%",
+  };
+
   return (
-    <div style={{ padding: 16, maxWidth: 980, margin: "0 auto" }}>
+    <div style={{ padding: 16, maxWidth: 860, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>🧱 Registro Pedane</h1>
-      <div style={{ opacity: 0.85, marginBottom: 14 }}>
-        Gestione pedane con tipi predefiniti (EPAL/CHEP/LPR/DUSS/IFCO...) + tipi personalizzati.
+      <div style={{ opacity: 0.85, fontWeight: 700 }}>
+        Qui registri pedane anche quando il QR è rovinato (codice manuale / codice alternativo).
       </div>
 
-      <div style={{ border: "1px solid #eee", borderRadius: 16, padding: 14, display: "grid", gap: 10 }}>
-        <div style={{ fontWeight: 900 }}>{editingId ? "✏️ Modifica Pedana" : "➕ Nuova Pedana"}</div>
+      {/* Form */}
+      <div
+        style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 18,
+          border: "1px solid #e6e6e6",
+          background: "white",
+        }}
+      >
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>
+          {editId ? "✏️ Modifica pedana" : "➕ Nuova pedana"}
+        </div>
 
-        <input
-          style={inputStyle}
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="Codice pedana (QR) es. PEDANA-0001"
-        />
+        <div style={{ display: "grid", gap: 10 }}>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Codice pedana (principale)</div>
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Es: PEDANA-000123" style={input} />
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.85 }}>
+              Suggerimento: se il QR non si legge, inserisci qui il codice manuale.
+            </div>
+          </div>
 
-        <select style={inputStyle} value={typeSelect} onChange={(e) => setTypeSelect(e.target.value)}>
-          {allTypes.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Codice alternativo (fallback)</div>
+            <input
+              value={altCode}
+              onChange={(e) => setAltCode(e.target.value)}
+              placeholder="Es: 0123 (codice breve scritto a penna)"
+              style={input}
+            />
+          </div>
 
-        {typeSelect === "Altro…" ? (
-          <input
-            style={inputStyle}
-            value={typeCustom}
-            onChange={(e) => setTypeCustom(e.target.value)}
-            placeholder="Inserisci nuovo tipo (es. CHEP 1200x1000 / IFCO 6410 / ecc)"
-          />
-        ) : null}
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Tipologia pedana</div>
+            <select value={type} onChange={(e) => setType(e.target.value)} style={input as any}>
+              {PALLET_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <select style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value as PalletStatus)}>
-          <option value="IN_DEPOSITO">In deposito</option>
-          <option value="IN_TRANSITO">In transito (autista)</option>
-          <option value="IN_NEGOZIO">In negozio</option>
-        </select>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Note</div>
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Es: negozio X, danneggiata, da ritirare..."
+              style={input}
+            />
+          </div>
 
-        <input
-          style={inputStyle}
-          value={locationLabel}
-          onChange={(e) => setLocationLabel(e.target.value)}
-          placeholder='Posizione (testo) es. "Deposito: Olbia" / "Autista: Mario" / "Negozio: Conad"'
-        />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={onSubmit} style={btn("#2e7d32")}>
+              {editId ? "Salva modifiche" : "Aggiungi al registro"}
+            </button>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button style={btn("#2e7d32")} onClick={onSubmit}>
-            {editingId ? "Salva modifiche" : "Aggiungi"}
-          </button>
-
-          {editingId ? (
-            <button style={btn("#9e9e9e")} onClick={resetForm}>
+            <button onClick={resetForm} style={{ ...btn("#616161") }}>
               Annulla
             </button>
-          ) : null}
 
-          <a
-            href="/"
-            style={{
-              ...btn("#0b1220"),
-              textDecoration: "none",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            ← Home
-          </a>
-        </div>
+            <a href="/scan" style={{ ...btn("#0b1220"), textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
+              📷 Vai a Scanner
+            </a>
 
-        <div style={{ fontSize: 13, opacity: 0.75 }}>
-          Tipi personalizzati salvati: <b>{customTypes.length}</b>
+            <button onClick={exportCsv} style={btn("#6a1b9a")}>
+              ⬇️ Export CSV
+            </button>
+          </div>
         </div>
       </div>
 
-      <div style={{ marginTop: 12 }}>
+      {/* Search */}
+      <div style={{ marginTop: 14 }}>
         <input
-          style={inputStyle}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="🔎 Cerca pedana (codice, tipo, stato, posizione)"
+          placeholder="🔎 Cerca per codice, codice alternativo, tipo, note..."
+          style={{ ...input, background: "white" }}
         />
       </div>
 
-      <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+      {/* List */}
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
         {filtered.length === 0 ? (
-          <div style={{ opacity: 0.8 }}>Nessuna pedana registrata.</div>
+          <div style={{ padding: 14, borderRadius: 18, border: "1px solid #eee", background: "white" }}>
+            Nessuna pedana trovata.
+          </div>
         ) : (
-          filtered.map((p) => {
-            const b = badge(p.status);
-            return (
-              <div key={p.id} style={{ border: "1px solid #eee", borderRadius: 16, padding: 14, background: "white" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontWeight: 900, fontSize: 18 }}>{p.code}</div>
-                    <div style={{ marginTop: 6 }}>
-                      Tipo: <b>{p.type}</b>
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      Posizione: <b>{p.locationLabel}</b>
-                    </div>
-                    <div style={{ marginTop: 6, opacity: 0.75, fontSize: 13 }}>
-                      Aggiornato: {p.updatedAt}
-                    </div>
-                  </div>
-
-                  <div style={{ padding: "8px 10px", borderRadius: 999, background: b.bg, color: b.fg, fontWeight: 900 }}>
-                    {b.label}
+          filtered.map((p) => (
+            <div
+              key={p.id}
+              style={{
+                padding: 14,
+                borderRadius: 18,
+                border: "1px solid #e6e6e6",
+                background: "white",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>{p.code}</div>
+                  <div style={{ opacity: 0.85, fontWeight: 700 }}>
+                    {p.type || "—"} {p.altCode ? ` • alt: ${p.altCode}` : ""}
                   </div>
                 </div>
 
-                <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button style={btn("#6a1b9a")} onClick={() => onEdit(p)}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => onEdit(p)} style={btn("#1e88e5")}>
                     Modifica
                   </button>
-                  <button style={btn("#e53935")} onClick={() => onDelete(p.id)}>
+                  <button onClick={() => onDelete(p.id)} style={btn("#e53935")}>
                     Elimina
                   </button>
                 </div>
               </div>
-            );
-          })
+
+              {p.notes ? <div style={{ marginTop: 8, fontWeight: 700 }}>{p.notes}</div> : null}
+
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                Ultimo rilevamento:{" "}
+                {p.lastSeenTs ? new Date(p.lastSeenTs).toLocaleString() : "—"}{" "}
+                {p.lastSource ? `(${p.lastSource})` : ""}
+                {typeof p.lastLat === "number" && typeof p.lastLng === "number"
+                  ? ` • GPS: ${p.lastLat.toFixed(6)}, ${p.lastLng.toFixed(6)}`
+                  : ""}
+              </div>
+            </div>
+          ))
         )}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <a href="/" style={{ fontWeight: 900, textDecoration: "none" }}>
+          ← Torna alla Home
+        </a>
       </div>
     </div>
   );
