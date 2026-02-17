@@ -1,70 +1,27 @@
-/* app/lib/storage.ts
-   Storage unico (localStorage) per:
-   - Pedane (registro)
-   - Storico scansioni
-   - Autisti / Negozi / Depositi
-   - Stock (giacenze) + movimenti
-*/
+// app/lib/storage.ts
+"use client";
 
 export type StockLocationKind = "NEGOZIO" | "DEPOSITO" | "AUTISTA";
 
 export type PalletItem = {
-  id: string;
-  code: string; // QR / codice pedana
-  createdTs: number;
-  updatedTs: number;
-
-  palletType?: string; // EUR/EPAL, CHEP, LPR, IFCO...
-  qty?: number; // di default 1
-
-  // ultima posizione GPS letta
+  id: string; // codice pedana (QR)
+  type: string; // EUR/EPAL/IFCO...
+  altCode?: string; // codice alternativo (opzionale)
   lastSeenTs?: number;
-  lastLat?: number;
-  lastLng?: number;
-  lastAccuracy?: number;
-  lastSource?: "qr" | "manual";
-
-  // “dove si trova ORA” dichiarato dall’operatore (negozio/deposito/autista)
-  locationKind?: StockLocationKind;
-  locationId?: string;
-
-  // opzionale: codici alternativi / note
-  altCode?: string;
-  notes?: string;
-
-  // stato
-  isMissing?: boolean;
-};
-
-export type DriverItem = { id: string; name: string; phone?: string; createdTs: number; updatedTs: number };
-export type ShopItem = { id: string; name: string; address?: string; createdTs: number; updatedTs: number };
-export type DepotItem = { id: string; name: string; address?: string; createdTs: number; updatedTs: number };
-
-export type ScanHistoryItem = {
-  id: string;
-  code: string;
-  ts: number;
-  lat?: number;
-  lng?: number;
-  accuracy?: number;
-  source: "qr" | "manual";
-
-  // se in quell’operazione è stato dichiarato uno spostamento/stock
-  declaredKind?: StockLocationKind;
-  declaredId?: string;
-  palletType?: string;
-  qty?: number;
+  location?: { kind: StockLocationKind; id: string };
   note?: string;
 };
 
-export type StockMove = {
+export type ShopItem = { id: string; name: string; address?: string };
+export type DepotItem = { id: string; name: string; address?: string };
+export type DriverItem = { id: string; name: string; phone?: string };
+
+export type ScanHistoryItem = {
   id: string;
   ts: number;
-  code: string;
-  palletType: string;
-  qty: number;
-  from: { kind: StockLocationKind; id: string };
-  to: { kind: StockLocationKind; id: string };
+  qr: string;
+  lat?: number;
+  lng?: number;
   note?: string;
 };
 
@@ -75,80 +32,66 @@ export type StockRow = {
   locationId: string;
 };
 
-// =========================
-// helpers
-// =========================
-
-const KEY = {
-  pallets: "pt_pallets_v1",
-  history: "pt_history_v1",
-  drivers: "pt_drivers_v1",
-  shops: "pt_shops_v1",
-  depots: "pt_depots_v1",
-  lastScan: "pt_lastscan_v1",
-  stockRows: "pt_stockrows_v1", // mappa giacenze
-  stockMoves: "pt_stockmoves_v1", // movimenti
+export type StockMove = {
+  id: string;
+  ts: number;
+  palletType: string;
+  qty: number;
+  from: { kind: StockLocationKind; id: string };
+  to: { kind: StockLocationKind; id: string };
+  note?: string;
+  palletId?: string;
 };
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof localStorage !== "undefined";
+const K = {
+  PALLETS: "pt_pallets",
+  SHOPS: "pt_shops",
+  DEPOTS: "pt_depots",
+  DRIVERS: "pt_drivers",
+  HISTORY: "pt_history",
+  LAST_SCAN: "pt_last_scan",
+  STOCK_ROWS: "pt_stock_rows",
+  STOCK_MOVES: "pt_stock_moves",
+};
+
+function safeJson<T>(raw: string | null, fallback: T): T {
+  try {
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getLS<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  return safeJson<T>(localStorage.getItem(key), fallback);
+}
+
+function setLS<T>(key: string, value: T) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(key, JSON.stringify(value));
 }
 
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
-function readJson<T>(key: string, fallback: T): T {
-  if (!isBrowser()) return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(key: string, value: any) {
-  if (!isBrowser()) return;
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function now() {
-  return Date.now();
-}
-
-function ensureSeed() {
-  // deposito di default (se non esiste)
-  const depots = getDepots();
-  if (depots.length === 0) {
-    addDepot({ name: "Deposito Centrale" });
-  }
-  // negozio di default (se non esiste)
-  const shops = getShops();
-  if (shops.length === 0) {
-    addShop({ name: "Negozio 1" });
-  }
-}
-
-// =========================
-// CSV utils
-// =========================
-
 export function formatDT(ts: number) {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
-    d.getSeconds()
-  )}`;
+  try {
+    return new Date(ts).toLocaleString();
+  } catch {
+    return String(ts);
+  }
 }
 
+/** CSV download helper */
 export function downloadCsv(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {
   const esc = (v: any) => {
     const s = String(v ?? "");
-    if (s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
+
   const csv = [headers.join(","), ...rows.map((r) => r.map(esc).join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -162,306 +105,246 @@ export function downloadCsv(filename: string, headers: string[], rows: (string |
   URL.revokeObjectURL(url);
 }
 
-// =========================
-// Pallets (Registro pedane)
-// =========================
+/* -------------------- SHOPS -------------------- */
+
+export function getShopOptions(): ShopItem[] {
+  const list = getLS<ShopItem[]>(K.SHOPS, []);
+  if (list.length === 0) {
+    const seed: ShopItem[] = [{ id: "shop_1", name: "Negozio 1" }];
+    setLS(K.SHOPS, seed);
+    return seed;
+  }
+  return list;
+}
+export function getShops() {
+  return getShopOptions();
+}
+export function addShop(name: string, address?: string) {
+  const list = getShopOptions();
+  const it: ShopItem = { id: uid("shop"), name: name.trim() || "Nuovo negozio", address };
+  setLS(K.SHOPS, [it, ...list]);
+  return it;
+}
+export function updateShop(item: ShopItem) {
+  const list = getShopOptions().map((x) => (x.id === item.id ? item : x));
+  setLS(K.SHOPS, list);
+}
+export function removeShop(id: string) {
+  setLS(K.SHOPS, getShopOptions().filter((x) => x.id !== id));
+}
+export function getDefaultShop(): ShopItem {
+  return getShopOptions()[0];
+}
+
+/* -------------------- DEPOTS -------------------- */
+
+export function getDepotOptions(): DepotItem[] {
+  const list = getLS<DepotItem[]>(K.DEPOTS, []);
+  if (list.length === 0) {
+    const seed: DepotItem[] = [{ id: "depot_1", name: "Deposito 1" }];
+    setLS(K.DEPOTS, seed);
+    return seed;
+  }
+  return list;
+}
+export function getDepots() {
+  return getDepotOptions();
+}
+export function addDepot(name: string, address?: string) {
+  const list = getDepotOptions();
+  const it: DepotItem = { id: uid("depot"), name: name.trim() || "Nuovo deposito", address };
+  setLS(K.DEPOTS, [it, ...list]);
+  return it;
+}
+export function updateDepot(item: DepotItem) {
+  const list = getDepotOptions().map((x) => (x.id === item.id ? item : x));
+  setLS(K.DEPOTS, list);
+}
+export function removeDepot(id: string) {
+  setLS(K.DEPOTS, getDepotOptions().filter((x) => x.id !== id));
+}
+export function getDefaultDepot(): DepotItem {
+  return getDepotOptions()[0];
+}
+
+/* -------------------- DRIVERS -------------------- */
+
+export function getDrivers(): DriverItem[] {
+  const list = getLS<DriverItem[]>(K.DRIVERS, []);
+  if (list.length === 0) {
+    const seed: DriverItem[] = [{ id: "drv_1", name: "Autista 1" }];
+    setLS(K.DRIVERS, seed);
+    return seed;
+  }
+  return list;
+}
+export function addDriver(name: string, phone?: string) {
+  const list = getDrivers();
+  const it: DriverItem = { id: uid("drv"), name: name.trim() || "Nuovo autista", phone };
+  setLS(K.DRIVERS, [it, ...list]);
+  return it;
+}
+export function updateDriver(item: DriverItem) {
+  const list = getDrivers().map((x) => (x.id === item.id ? item : x));
+  setLS(K.DRIVERS, list);
+}
+export function removeDriver(id: string) {
+  setLS(K.DRIVERS, getDrivers().filter((x) => x.id !== id));
+}
+
+/* -------------------- PALLETS REGISTRY -------------------- */
 
 export function getPallets(): PalletItem[] {
-  ensureSeed();
-  return readJson<PalletItem[]>(KEY.pallets, []);
+  return getLS<PalletItem[]>(K.PALLETS, []);
 }
 
-export function setPallets(list: PalletItem[]) {
-  writeJson(KEY.pallets, list);
-}
-
-export function upsertPallet(partial: Partial<PalletItem> & { code: string }): PalletItem {
-  const all = getPallets();
-  const code = partial.code.trim();
-  const idx = all.findIndex((p) => p.code === code);
-
+export function upsertPallet(item: PalletItem) {
+  const list = getPallets();
+  const idx = list.findIndex((x) => x.id === item.id);
   if (idx >= 0) {
-    const prev = all[idx];
-    const next: PalletItem = {
-      ...prev,
-      ...partial,
-      id: prev.id,
-      code,
-      updatedTs: now(),
-      createdTs: prev.createdTs ?? now(),
-    };
-    all[idx] = next;
-    setPallets(all);
-    return next;
+    list[idx] = { ...list[idx], ...item };
+    setLS(K.PALLETS, list);
+    return list[idx];
   }
-
-  const created: PalletItem = {
-    id: uid("p"),
-    code,
-    createdTs: now(),
-    updatedTs: now(),
-    qty: partial.qty ?? 1,
-    ...partial,
-  };
-  all.unshift(created);
-  setPallets(all);
-  return created;
+  setLS(K.PALLETS, [item, ...list]);
+  return item;
 }
 
 export function deletePallet(id: string) {
-  const all = getPallets().filter((p) => p.id !== id);
-  setPallets(all);
+  setLS(K.PALLETS, getPallets().filter((x) => x.id !== id));
 }
 
-export function markMissing(id: string, isMissing: boolean) {
-  const all = getPallets();
-  const idx = all.findIndex((p) => p.id === id);
-  if (idx < 0) return;
-  all[idx] = { ...all[idx], isMissing, updatedTs: now() };
-  setPallets(all);
+/* -------------------- HISTORY -------------------- */
+
+export function getHistory(): ScanHistoryItem[] {
+  return getLS<ScanHistoryItem[]>(K.HISTORY, []);
 }
-
-// =========================
-// History (Storico scansioni)
-// =========================
-
-export function getScanHistory(): ScanHistoryItem[] {
-  return readJson<ScanHistoryItem[]>(KEY.history, []);
+export function addScanHistory(qr: string, lat?: number, lng?: number, note?: string) {
+  const list = getHistory();
+  const it: ScanHistoryItem = { id: uid("h"), ts: Date.now(), qr, lat, lng, note };
+  setLS(K.HISTORY, [it, ...list].slice(0, 5000));
+  return it;
 }
-
-export function addScanHistory(item: Omit<ScanHistoryItem, "id">) {
-  const all = getScanHistory();
-  all.unshift({ ...item, id: uid("h") });
-  writeJson(KEY.history, all.slice(0, 5000)); // cap
-}
-
-export function clearScanHistory() {
-  writeJson(KEY.history, []);
-}
-
-// compat: alcuni tuoi file importano addHistory
+// alias compatibilità (per i vecchi import)
 export const addHistory = addScanHistory;
 
-export function setLastScan(code: string) {
-  writeJson(KEY.lastScan, { code: code.trim(), ts: now() });
-}
-export function getLastScan(): { code: string; ts: number } | null {
-  return readJson(KEY.lastScan, null as any);
+export function clearHistory() {
+  setLS(K.HISTORY, []);
 }
 
-// =========================
-// Drivers
-// =========================
-
-export function getDrivers(): DriverItem[] {
-  return readJson<DriverItem[]>(KEY.drivers, []);
+/* last scan (comodissimo per report/missing) */
+export function setLastScan(qr: string) {
+  setLS(K.LAST_SCAN, { qr, ts: Date.now() });
+}
+export function getLastScan(): { qr: string; ts: number } | null {
+  return getLS<{ qr: string; ts: number } | null>(K.LAST_SCAN, null);
 }
 
-export function addDriver(input: { name: string; phone?: string }) {
-  const all = getDrivers();
-  const it: DriverItem = { id: uid("d"), name: input.name.trim(), phone: input.phone?.trim(), createdTs: now(), updatedTs: now() };
-  all.unshift(it);
-  writeJson(KEY.drivers, all);
-  return it;
-}
-
-export function updateDriver(id: string, patch: Partial<DriverItem>) {
-  const all = getDrivers();
-  const idx = all.findIndex((x) => x.id === id);
-  if (idx < 0) return;
-  all[idx] = { ...all[idx], ...patch, updatedTs: now() };
-  writeJson(KEY.drivers, all);
-}
-
-export function removeDriver(id: string) {
-  writeJson(KEY.drivers, getDrivers().filter((x) => x.id !== id));
-}
-
-// =========================
-// Shops
-// =========================
-
-export function getShops(): ShopItem[] {
-  return readJson<ShopItem[]>(KEY.shops, []);
-}
-
-export function addShop(input: { name: string; address?: string }) {
-  const all = getShops();
-  const it: ShopItem = { id: uid("s"), name: input.name.trim(), address: input.address?.trim(), createdTs: now(), updatedTs: now() };
-  all.unshift(it);
-  writeJson(KEY.shops, all);
-  return it;
-}
-
-export function updateShop(id: string, patch: Partial<ShopItem>) {
-  const all = getShops();
-  const idx = all.findIndex((x) => x.id === id);
-  if (idx < 0) return;
-  all[idx] = { ...all[idx], ...patch, updatedTs: now() };
-  writeJson(KEY.shops, all);
-}
-
-export function removeShop(id: string) {
-  writeJson(KEY.shops, getShops().filter((x) => x.id !== id));
-}
-
-export function getDefaultShop(): ShopItem {
-  ensureSeed();
-  return getShops()[0];
-}
-
-// compat: alcuni tuoi file importano getShopOptions
-export function getShopOptions(): ShopItem[] {
-  ensureSeed();
-  return getShops();
-}
-
-// =========================
-// Depots
-// =========================
-
-export function getDepots(): DepotItem[] {
-  return readJson<DepotItem[]>(KEY.depots, []);
-}
-
-export function addDepot(input: { name: string; address?: string }) {
-  const all = getDepots();
-  const it: DepotItem = { id: uid("w"), name: input.name.trim(), address: input.address?.trim(), createdTs: now(), updatedTs: now() };
-  all.unshift(it);
-  writeJson(KEY.depots, all);
-  return it;
-}
-
-export function updateDepot(id: string, patch: Partial<DepotItem>) {
-  const all = getDepots();
-  const idx = all.findIndex((x) => x.id === id);
-  if (idx < 0) return;
-  all[idx] = { ...all[idx], ...patch, updatedTs: now() };
-  writeJson(KEY.depots, all);
-}
-
-export function removeDepot(id: string) {
-  writeJson(KEY.depots, getDepots().filter((x) => x.id !== id));
-}
-
-export function getDefaultDepot(): DepotItem {
-  ensureSeed();
-  return getDepots()[0];
-}
-
-export function getDepotOptions(): DepotItem[] {
-  ensureSeed();
-  return getDepots();
-}
-
-// =========================
-// Stock (rows + moves)
-// =========================
-
-type StockMap = Record<string, number>; // key = `${kind}:${id}:${type}` -> qty
-
-function readStockMap(): StockMap {
-  return readJson<StockMap>(KEY.stockRows, {});
-}
-
-function writeStockMap(m: StockMap) {
-  writeJson(KEY.stockRows, m);
-}
+/* -------------------- STOCK -------------------- */
 
 export function getStockRows(): StockRow[] {
-  const m = readStockMap();
-  const rows: StockRow[] = [];
-  for (const k of Object.keys(m)) {
-    const qty = m[k] || 0;
-    if (qty === 0) continue;
-    const [kind, id, ...rest] = k.split(":");
-    const palletType = rest.join(":");
-    if (kind !== "NEGOZIO" && kind !== "DEPOSITO" && kind !== "AUTISTA") continue;
-    rows.push({ locationKind: kind, locationId: id, palletType, qty });
-  }
-  return rows;
+  return getLS<StockRow[]>(K.STOCK_ROWS, []);
 }
-
-function stockKey(kind: StockLocationKind, id: string, palletType: string) {
-  return `${kind}:${id}:${palletType}`;
-}
-
-function addStockDelta(kind: StockLocationKind, id: string, palletType: string, delta: number) {
-  const m = readStockMap();
-  const k = stockKey(kind, id, palletType);
-  const next = (m[k] || 0) + delta;
-  m[k] = Math.max(0, next);
-  writeStockMap(m);
-}
-
 export function getStockMoves(): StockMove[] {
-  return readJson<StockMove[]>(KEY.stockMoves, []);
+  return getLS<StockMove[]>(K.STOCK_MOVES, []);
 }
 
-function addStockMove(move: Omit<StockMove, "id">) {
-  const all = getStockMoves();
-  all.unshift({ ...move, id: uid("m") });
-  writeJson(KEY.stockMoves, all.slice(0, 10000));
+function setStockRows(rows: StockRow[]) {
+  setLS(K.STOCK_ROWS, rows);
+}
+function setStockMoves(moves: StockMove[]) {
+  setLS(K.STOCK_MOVES, moves);
 }
 
-// =========================
-// Move via Scan (aggiorna pallet + stock + log)
-// =========================
+function upsertStockRow(row: StockRow) {
+  const rows = getStockRows();
+  const idx = rows.findIndex(
+    (r) => r.palletType === row.palletType && r.locationKind === row.locationKind && r.locationId === row.locationId
+  );
+  if (idx >= 0) {
+    rows[idx] = { ...rows[idx], qty: row.qty };
+  } else {
+    rows.push(row);
+  }
+  setStockRows(rows.filter((r) => r.qty !== 0));
+}
 
-export function movePalletViaScan(input: {
-  code: string;
+function incStock(palletType: string, kind: StockLocationKind, id: string, delta: number) {
+  const rows = getStockRows();
+  const idx = rows.findIndex((r) => r.palletType === palletType && r.locationKind === kind && r.locationId === id);
+  const cur = idx >= 0 ? rows[idx].qty : 0;
+  const next = cur + delta;
+  if (idx >= 0) rows[idx].qty = next;
+  else rows.push({ palletType, qty: next, locationKind: kind, locationId: id });
+  setStockRows(rows.filter((r) => r.qty !== 0));
+}
+
+/**
+ * Move “logico” + aggiornamento giacenze per tipo pedana.
+ * - Se la pedana esiste nel registro, usa la sua location precedente come "from"
+ * - Altrimenti from = to (nessuna scalata)
+ */
+export function movePalletViaScan(args: {
+  palletId: string; // QR
   palletType: string;
   qty: number;
   toKind: StockLocationKind;
   toId: string;
   note?: string;
 }) {
-  ensureSeed();
+  const qty = Math.max(1, Math.floor(args.qty || 1));
+  const palletType = (args.palletType || "EUR / EPAL").trim();
 
-  const code = input.code.trim();
-  const palletType = input.palletType.trim();
-  const qty = Math.max(1, Math.floor(Number(input.qty) || 1));
-  const toKind = input.toKind;
-  const toId = input.toId;
+  const pallets = getPallets();
+  const p = pallets.find((x) => x.id === args.palletId);
 
-  // pallet corrente
-  const p = upsertPallet({ code });
+  const fromKind: StockLocationKind = p?.location?.kind || args.toKind;
+  const fromId: string = p?.location?.id || args.toId;
 
-  const fromKind: StockLocationKind = p.locationKind ?? "NEGOZIO";
-  const fromId: string = p.locationId ?? getDefaultShop().id;
-
-  // aggiorna stock SOLO se cambia destinazione o anche se uguale (somma qty)
-  // - se cambia: scala dal vecchio e aggiunge al nuovo
-  // - se uguale: aggiunge al nuovo (utile per carichi multipli)
-  if (fromKind !== toKind || fromId !== toId) {
-    if (p.palletType) addStockDelta(fromKind, fromId, p.palletType, -qty);
-    addStockDelta(toKind, toId, palletType, +qty);
-  } else {
-    addStockDelta(toKind, toId, palletType, +qty);
+  // aggiorna stock: scala dal from SOLO se cambia location
+  if (fromKind !== args.toKind || fromId !== args.toId) {
+    incStock(palletType, fromKind, fromId, -qty);
   }
+  incStock(palletType, args.toKind, args.toId, +qty);
 
-  // aggiorna pallet
-  upsertPallet({
-    code,
-    palletType,
-    qty,
-    locationKind: toKind,
-    locationId: toId,
-    notes: input.note ? input.note : p.notes,
-  });
-
-  addStockMove({
-    ts: now(),
-    code,
+  // registra move
+  const moves = getStockMoves();
+  const mv: StockMove = {
+    id: uid("mv"),
+    ts: Date.now(),
     palletType,
     qty,
     from: { kind: fromKind, id: fromId },
-    to: { kind: toKind, id: toId },
-    note: input.note,
-  });
-
-  return {
-    from: { kind: fromKind, id: fromId },
-    to: { kind: toKind, id: toId },
+    to: { kind: args.toKind, id: args.toId },
+    note: args.note,
+    palletId: args.palletId,
   };
+  setStockMoves([mv, ...moves].slice(0, 5000));
+
+  // aggiorna registro pedane
+  upsertPallet({
+    id: args.palletId,
+    type: palletType,
+    lastSeenTs: Date.now(),
+    location: { kind: args.toKind, id: args.toId },
+    note: args.note,
+    altCode: p?.altCode,
+  });
+
+  return mv;
+}
+
+/* -------------------- HELPERS (nomi usati nelle pagine) -------------------- */
+
+export function formatDTShort(ts: number) {
+  return formatDT(ts);
+}
+
+/** alias compatibilità: alcuni file chiamavano getStockMoves/getStockRows già ok */
+
+/** utile per etichette UI */
+export function locationName(kind: StockLocationKind, id: string) {
+  if (kind === "DEPOSITO") return getDepotOptions().find((x) => x.id === id)?.name || "—";
+  if (kind === "AUTISTA") return getDrivers().find((x) => x.id === id)?.name || "—";
+  return getShopOptions().find((x) => x.id === id)?.name || "—";
 }
