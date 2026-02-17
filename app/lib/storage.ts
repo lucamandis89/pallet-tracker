@@ -18,6 +18,7 @@ export type ScanEvent = {
   declaredId?: string;
   palletType?: string;
   qty?: number;
+  note?: string;
 };
 
 export type PalletItem = {
@@ -29,6 +30,7 @@ export type PalletItem = {
   lastSeenTs?: number;
   lastLat?: number;
   lastLng?: number;
+  lastAccuracy?: number;
   lastSource?: "qr" | "manual";
   lastLocKind?: StockLocationKind;
   lastLocId?: string;
@@ -38,9 +40,6 @@ export type DriverItem = {
   id: string;
   name: string;
   phone?: string;
-  address?: string;
-  lat?: number;
-  lng?: number;
   notes?: string;
   createdAt: number;
 };
@@ -48,11 +47,8 @@ export type DriverItem = {
 export type ShopItem = {
   id: string;
   name: string;
-  code?: string;
-  phone?: string;
   address?: string;
-  lat?: number;
-  lng?: number;
+  phone?: string;
   notes?: string;
   createdAt: number;
 };
@@ -61,8 +57,6 @@ export type DepotItem = {
   id: string;
   name: string;
   address?: string;
-  lat?: number;
-  lng?: number;
   notes?: string;
   createdAt: number;
 };
@@ -110,7 +104,7 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
-function uid(prefix = "id"): string {
+export function uid(prefix = "id"): string {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
@@ -137,6 +131,10 @@ export function downloadCsv(filename: string, headers: string[], rows: any[][]) 
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+export function formatDT(ts: number) {
+  return new Date(ts).toLocaleString();
+}
+
 /* ============================
    HISTORY
 ============================ */
@@ -153,7 +151,7 @@ export function setHistory(items: ScanEvent[]) {
 export function addHistory(ev: Omit<ScanEvent, "id">) {
   const items = getHistory();
   items.unshift({ id: uid("scan"), ...ev });
-  setHistory(items.slice(0, 2000));
+  setHistory(items.slice(0, 5000));
 }
 
 export function setLastScan(code: string) {
@@ -208,6 +206,7 @@ export function upsertPallet(update: Partial<PalletItem> & { code: string }) {
       lastSeenTs: update.lastSeenTs,
       lastLat: update.lastLat,
       lastLng: update.lastLng,
+      lastAccuracy: update.lastAccuracy,
       lastSource: update.lastSource,
       lastLocKind: update.lastLocKind,
       lastLocId: update.lastLocId,
@@ -298,10 +297,14 @@ export function removeShop(id: string) {
 }
 
 /* ============================
-   DEPOTS (default)
+   DEPOTS + DEFAULT
 ============================ */
 
 const DEFAULT_DEPOT_ID = "dep_default";
+
+export function getDefaultDepot(): DepotItem {
+  return { id: DEFAULT_DEPOT_ID, name: "Deposito Principale", createdAt: 0 };
+}
 
 export function getDepots(): DepotItem[] {
   if (typeof window === "undefined") return [];
@@ -312,12 +315,28 @@ export function setDepots(items: DepotItem[]) {
   localStorage.setItem(KEY_DEPOTS, JSON.stringify(items));
 }
 
-export function getDefaultDepot(): DepotItem {
-  return { id: DEFAULT_DEPOT_ID, name: "Deposito Principale", createdAt: 0 };
-}
-
 export function getDepotOptions(): DepotItem[] {
   return [getDefaultDepot(), ...getDepots()];
+}
+
+export function addDepot(data: Omit<DepotItem, "id" | "createdAt">) {
+  const list = getDepots();
+  const item: DepotItem = { id: uid("dep"), createdAt: Date.now(), ...data };
+  list.unshift(item);
+  setDepots(list);
+  return item;
+}
+
+export function updateDepot(id: string, patch: Partial<DepotItem>) {
+  const list = getDepots();
+  const idx = list.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  list[idx] = { ...list[idx], ...patch };
+  setDepots(list);
+}
+
+export function removeDepot(id: string) {
+  setDepots(getDepots().filter((x) => x.id !== id));
 }
 
 /* ============================
@@ -374,10 +393,6 @@ export function addStockMove(input: Omit<StockMove, "id" | "ts"> & { ts?: number
   setStockMoves(moves.slice(0, 5000));
   return m;
 }
-
-/* ============================
-   HELPERS Scan -> Stock
-============================ */
 
 export function getLastKnownLocForPallet(code: string): { kind: StockLocationKind; id: string } {
   const p = findPalletByCode(code);
