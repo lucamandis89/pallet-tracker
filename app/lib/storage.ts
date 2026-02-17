@@ -1,350 +1,435 @@
 // app/lib/storage.ts
-"use client";
+// Storage unico (localStorage) — allineato con tutte le pagine dell'app
 
-export type StockLocationKind = "NEGOZIO" | "DEPOSITO" | "AUTISTA";
+export type StockLocationKind = "shop" | "depot" | "driver";
+
+export type PalletType = "EUR/EPAL" | "CHEP" | "LPR" | "IFCO" | "ALTRO";
 
 export type PalletItem = {
-  id: string; // codice pedana (QR)
-  type: string; // EUR/EPAL/IFCO...
-  altCode?: string; // codice alternativo (opzionale)
+  id: string;
+  code: string;
+  type?: PalletType | string;
+  altCode?: string;
+  notes?: string;
+
+  createdTs?: number;
+
+  // tracking
   lastSeenTs?: number;
-  location?: { kind: StockLocationKind; id: string };
-  note?: string;
+  lastLat?: number;
+  lastLng?: number;
+  lastSource?: "qr" | "manual";
 };
 
-export type ShopItem = { id: string; name: string; address?: string };
-export type DepotItem = { id: string; name: string; address?: string };
-export type DriverItem = { id: string; name: string; phone?: string };
+export type ShopItem = {
+  id: string;
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  createdTs?: number;
+};
+
+export type DepotItem = {
+  id: string;
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  createdTs?: number;
+};
+
+export type DriverItem = {
+  id: string;
+  name: string;
+  phone?: string;
+  plate?: string;
+  createdTs?: number;
+};
+
+export type StockEntry = {
+  id: string;
+  palletCode: string;
+  palletType?: string;
+  qty: number;
+
+  locationKind: StockLocationKind;
+  locationId: string;
+
+  updatedTs: number;
+  note?: string;
+};
 
 export type ScanHistoryItem = {
   id: string;
   ts: number;
-  qr: string;
+
+  code: string;
+  source: "qr" | "manual";
+
   lat?: number;
   lng?: number;
+
+  palletType?: string;
+  qty?: number;
+
+  locationKind?: StockLocationKind;
+  locationId?: string;
+
   note?: string;
 };
 
-export type StockRow = {
-  palletType: string;
-  qty: number;
-  locationKind: StockLocationKind;
-  locationId: string;
-};
+const KEY_PALLETS = "pallet_tracker_pallets";
+const KEY_SHOPS = "pallet_tracker_shops";
+const KEY_DEPOTS = "pallet_tracker_depots";
+const KEY_DRIVERS = "pallet_tracker_drivers";
+const KEY_STOCK = "pallet_tracker_stock";
+const KEY_HISTORY = "pallet_tracker_history";
+const KEY_LAST_SCAN = "pallet_tracker_last_scan";
 
-export type StockMove = {
-  id: string;
-  ts: number;
-  palletType: string;
-  qty: number;
-  from: { kind: StockLocationKind; id: string };
-  to: { kind: StockLocationKind; id: string };
-  note?: string;
-  palletId?: string;
-};
+// ---------------- helpers ----------------
+function hasLocalStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
 
-const K = {
-  PALLETS: "pt_pallets",
-  SHOPS: "pt_shops",
-  DEPOTS: "pt_depots",
-  DRIVERS: "pt_drivers",
-  HISTORY: "pt_history",
-  LAST_SCAN: "pt_last_scan",
-  STOCK_ROWS: "pt_stock_rows",
-  STOCK_MOVES: "pt_stock_moves",
-};
-
-function safeJson<T>(raw: string | null, fallback: T): T {
+function safeParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
   try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    return JSON.parse(raw) as T;
   } catch {
     return fallback;
   }
 }
 
-function getLS<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  return safeJson<T>(localStorage.getItem(key), fallback);
+function uid(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function setLS<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
+function clampInt(n: any, fallback = 0) {
+  const x = Number.parseInt(String(n), 10);
+  return Number.isFinite(x) ? x : fallback;
 }
 
-function uid(prefix = "id") {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
-}
-
-export function formatDT(ts: number) {
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return String(ts);
-  }
-}
-
-/** CSV download helper */
-export function downloadCsv(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {
-  const esc = (v: any) => {
-    const s = String(v ?? "");
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-
-  const csv = [headers.join(","), ...rows.map((r) => r.map(esc).join(","))].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-/* -------------------- SHOPS -------------------- */
-
-export function getShopOptions(): ShopItem[] {
-  const list = getLS<ShopItem[]>(K.SHOPS, []);
-  if (list.length === 0) {
-    const seed: ShopItem[] = [{ id: "shop_1", name: "Negozio 1" }];
-    setLS(K.SHOPS, seed);
-    return seed;
-  }
-  return list;
-}
-export function getShops() {
-  return getShopOptions();
-}
-export function addShop(name: string, address?: string) {
-  const list = getShopOptions();
-  const it: ShopItem = { id: uid("shop"), name: name.trim() || "Nuovo negozio", address };
-  setLS(K.SHOPS, [it, ...list]);
-  return it;
-}
-export function updateShop(item: ShopItem) {
-  const list = getShopOptions().map((x) => (x.id === item.id ? item : x));
-  setLS(K.SHOPS, list);
-}
-export function removeShop(id: string) {
-  setLS(K.SHOPS, getShopOptions().filter((x) => x.id !== id));
-}
-export function getDefaultShop(): ShopItem {
-  return getShopOptions()[0];
-}
-
-/* -------------------- DEPOTS -------------------- */
-
-export function getDepotOptions(): DepotItem[] {
-  const list = getLS<DepotItem[]>(K.DEPOTS, []);
-  if (list.length === 0) {
-    const seed: DepotItem[] = [{ id: "depot_1", name: "Deposito 1" }];
-    setLS(K.DEPOTS, seed);
-    return seed;
-  }
-  return list;
-}
-export function getDepots() {
-  return getDepotOptions();
-}
-export function addDepot(name: string, address?: string) {
-  const list = getDepotOptions();
-  const it: DepotItem = { id: uid("depot"), name: name.trim() || "Nuovo deposito", address };
-  setLS(K.DEPOTS, [it, ...list]);
-  return it;
-}
-export function updateDepot(item: DepotItem) {
-  const list = getDepotOptions().map((x) => (x.id === item.id ? item : x));
-  setLS(K.DEPOTS, list);
-}
-export function removeDepot(id: string) {
-  setLS(K.DEPOTS, getDepotOptions().filter((x) => x.id !== id));
-}
-export function getDefaultDepot(): DepotItem {
-  return getDepotOptions()[0];
-}
-
-/* -------------------- DRIVERS -------------------- */
-
-export function getDrivers(): DriverItem[] {
-  const list = getLS<DriverItem[]>(K.DRIVERS, []);
-  if (list.length === 0) {
-    const seed: DriverItem[] = [{ id: "drv_1", name: "Autista 1" }];
-    setLS(K.DRIVERS, seed);
-    return seed;
-  }
-  return list;
-}
-export function addDriver(name: string, phone?: string) {
-  const list = getDrivers();
-  const it: DriverItem = { id: uid("drv"), name: name.trim() || "Nuovo autista", phone };
-  setLS(K.DRIVERS, [it, ...list]);
-  return it;
-}
-export function updateDriver(item: DriverItem) {
-  const list = getDrivers().map((x) => (x.id === item.id ? item : x));
-  setLS(K.DRIVERS, list);
-}
-export function removeDriver(id: string) {
-  setLS(K.DRIVERS, getDrivers().filter((x) => x.id !== id));
-}
-
-/* -------------------- PALLETS REGISTRY -------------------- */
-
+// ---------------- pallets ----------------
 export function getPallets(): PalletItem[] {
-  return getLS<PalletItem[]>(K.PALLETS, []);
+  if (!hasLocalStorage()) return [];
+  return safeParse<PalletItem[]>(window.localStorage.getItem(KEY_PALLETS), []);
 }
 
-export function upsertPallet(item: PalletItem) {
-  const list = getPallets();
-  const idx = list.findIndex((x) => x.id === item.id);
+export function setPallets(list: PalletItem[]) {
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_PALLETS, JSON.stringify(list || []));
+}
+
+export function upsertPallet(input: Partial<PalletItem> & { code: string }) {
+  const all = getPallets();
+  const code = (input.code || "").trim();
+  if (!code) return;
+
+  const idx =
+    (input.id ? all.findIndex((x) => x.id === input.id) : -1) >= 0
+      ? all.findIndex((x) => x.id === input.id)
+      : all.findIndex((x) => (x.code || "").toLowerCase() === code.toLowerCase());
+
+  const now = Date.now();
+
   if (idx >= 0) {
-    list[idx] = { ...list[idx], ...item };
-    setLS(K.PALLETS, list);
-    return list[idx];
+    const prev = all[idx];
+    const updated: PalletItem = {
+      ...prev,
+      ...input,
+      code,
+      createdTs: prev.createdTs || input.createdTs || now,
+    };
+    all[idx] = updated;
+  } else {
+    const created: PalletItem = {
+      id: input.id || uid("p"),
+      code,
+      type: input.type,
+      altCode: input.altCode,
+      notes: input.notes,
+      createdTs: input.createdTs || now,
+      lastSeenTs: input.lastSeenTs,
+      lastLat: input.lastLat,
+      lastLng: input.lastLng,
+      lastSource: input.lastSource,
+    };
+    all.push(created);
   }
-  setLS(K.PALLETS, [item, ...list]);
-  return item;
+
+  setPallets(all);
 }
 
 export function deletePallet(id: string) {
-  setLS(K.PALLETS, getPallets().filter((x) => x.id !== id));
+  const all = getPallets();
+  setPallets(all.filter((x) => x.id !== id));
 }
 
-/* -------------------- HISTORY -------------------- */
+// ---------------- shops ----------------
+export function getShops(): ShopItem[] {
+  if (!hasLocalStorage()) return [];
+  return safeParse<ShopItem[]>(window.localStorage.getItem(KEY_SHOPS), []);
+}
 
-export function getHistory(): ScanHistoryItem[] {
-  return getLS<ScanHistoryItem[]>(K.HISTORY, []);
+export function setShops(list: ShopItem[]) {
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_SHOPS, JSON.stringify(list || []));
 }
-export function addScanHistory(qr: string, lat?: number, lng?: number, note?: string) {
-  const list = getHistory();
-  const it: ScanHistoryItem = { id: uid("h"), ts: Date.now(), qr, lat, lng, note };
-  setLS(K.HISTORY, [it, ...list].slice(0, 5000));
-  return it;
+
+export function addShop(name: string) {
+  const n = (name || "").trim();
+  if (!n) return;
+  const all = getShops();
+  all.push({ id: uid("shop"), name: n, createdTs: Date.now() });
+  setShops(all);
 }
-// alias compatibilità (per i vecchi import)
-export const addHistory = addScanHistory;
+
+export function updateShop(id: string, patch: Partial<ShopItem>) {
+  const all = getShops();
+  const idx = all.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  all[idx] = { ...all[idx], ...patch };
+  setShops(all);
+}
+
+export function removeShop(id: string) {
+  setShops(getShops().filter((x) => x.id !== id));
+}
+
+export function getDefaultShop(): string {
+  return getShops()[0]?.id || "";
+}
+
+// ---------------- depots ----------------
+export function getDepots(): DepotItem[] {
+  if (!hasLocalStorage()) return [];
+  return safeParse<DepotItem[]>(window.localStorage.getItem(KEY_DEPOTS), []);
+}
+
+export function setDepots(list: DepotItem[]) {
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_DEPOTS, JSON.stringify(list || []));
+}
+
+export function addDepot(name: string) {
+  const n = (name || "").trim();
+  if (!n) return;
+  const all = getDepots();
+  all.push({ id: uid("depot"), name: n, createdTs: Date.now() });
+  setDepots(all);
+}
+
+export function updateDepot(id: string, patch: Partial<DepotItem>) {
+  const all = getDepots();
+  const idx = all.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  all[idx] = { ...all[idx], ...patch };
+  setDepots(all);
+}
+
+export function removeDepot(id: string) {
+  setDepots(getDepots().filter((x) => x.id !== id));
+}
+
+export function getDefaultDepot(): string {
+  return getDepots()[0]?.id || "";
+}
+
+// ---------------- drivers ----------------
+export function getDrivers(): DriverItem[] {
+  if (!hasLocalStorage()) return [];
+  return safeParse<DriverItem[]>(window.localStorage.getItem(KEY_DRIVERS), []);
+}
+
+export function setDrivers(list: DriverItem[]) {
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_DRIVERS, JSON.stringify(list || []));
+}
+
+export function addDriver(name: string) {
+  const n = (name || "").trim();
+  if (!n) return;
+  const all = getDrivers();
+  all.push({ id: uid("drv"), name: n, createdTs: Date.now() });
+  setDrivers(all);
+}
+
+export function updateDriver(id: string, patch: Partial<DriverItem>) {
+  const all = getDrivers();
+  const idx = all.findIndex((x) => x.id === id);
+  if (idx < 0) return;
+  all[idx] = { ...all[idx], ...patch };
+  setDrivers(all);
+}
+
+export function removeDriver(id: string) {
+  setDrivers(getDrivers().filter((x) => x.id !== id));
+}
+
+// ---------------- scan history ----------------
+export function getScanHistory(): ScanHistoryItem[] {
+  if (!hasLocalStorage()) return [];
+  return safeParse<ScanHistoryItem[]>(window.localStorage.getItem(KEY_HISTORY), []);
+}
+
+// compat: alcune pagine lo chiamavano addHistory
+export function addHistory(item: Omit<ScanHistoryItem, "id" | "ts"> & { ts?: number }) {
+  addScanHistory(item);
+}
+
+export function addScanHistory(item: Omit<ScanHistoryItem, "id" | "ts"> & { ts?: number }) {
+  const all = getScanHistory();
+  all.unshift({
+    id: uid("h"),
+    ts: item.ts || Date.now(),
+    code: item.code,
+    source: item.source,
+    lat: item.lat,
+    lng: item.lng,
+    palletType: item.palletType,
+    qty: item.qty,
+    locationKind: item.locationKind,
+    locationId: item.locationId,
+    note: item.note,
+  });
+  window.localStorage.setItem(KEY_HISTORY, JSON.stringify(all.slice(0, 5000))); // limite
+}
 
 export function clearHistory() {
-  setLS(K.HISTORY, []);
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_HISTORY, JSON.stringify([]));
 }
 
-/* last scan (comodissimo per report/missing) */
-export function setLastScan(qr: string) {
-  setLS(K.LAST_SCAN, { qr, ts: Date.now() });
-}
-export function getLastScan(): { qr: string; ts: number } | null {
-  return getLS<{ qr: string; ts: number } | null>(K.LAST_SCAN, null);
+export function setLastScan(code: string) {
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_LAST_SCAN, (code || "").trim());
 }
 
-/* -------------------- STOCK -------------------- */
-
-export function getStockRows(): StockRow[] {
-  return getLS<StockRow[]>(K.STOCK_ROWS, []);
-}
-export function getStockMoves(): StockMove[] {
-  return getLS<StockMove[]>(K.STOCK_MOVES, []);
+export function getLastScan(): string {
+  if (!hasLocalStorage()) return "";
+  return (window.localStorage.getItem(KEY_LAST_SCAN) || "").trim();
 }
 
-function setStockRows(rows: StockRow[]) {
-  setLS(K.STOCK_ROWS, rows);
-}
-function setStockMoves(moves: StockMove[]) {
-  setLS(K.STOCK_MOVES, moves);
+// ---------------- stock ----------------
+export function getStock(): StockEntry[] {
+  if (!hasLocalStorage()) return [];
+  return safeParse<StockEntry[]>(window.localStorage.getItem(KEY_STOCK), []);
 }
 
-function upsertStockRow(row: StockRow) {
-  const rows = getStockRows();
-  const idx = rows.findIndex(
-    (r) => r.palletType === row.palletType && r.locationKind === row.locationKind && r.locationId === row.locationId
-  );
+export function setStock(list: StockEntry[]) {
+  if (!hasLocalStorage()) return;
+  window.localStorage.setItem(KEY_STOCK, JSON.stringify(list || []));
+}
+
+function stockKey(e: Pick<StockEntry, "palletCode" | "locationKind" | "locationId">) {
+  return `${e.palletCode.toLowerCase()}|${e.locationKind}|${e.locationId}`;
+}
+
+export function upsertStockEntry(input: Omit<StockEntry, "id" | "updatedTs"> & { id?: string; updatedTs?: number }) {
+  const all = getStock();
+  const code = (input.palletCode || "").trim();
+  if (!code) return;
+
+  const k = stockKey({ palletCode: code, locationKind: input.locationKind, locationId: input.locationId });
+  const idx = all.findIndex((x) => stockKey(x) === k);
+
+  const now = input.updatedTs || Date.now();
+  const qty = clampInt(input.qty, 0);
+
   if (idx >= 0) {
-    rows[idx] = { ...rows[idx], qty: row.qty };
+    all[idx] = {
+      ...all[idx],
+      palletCode: code,
+      palletType: input.palletType,
+      qty,
+      note: input.note,
+      updatedTs: now,
+    };
   } else {
-    rows.push(row);
+    all.push({
+      id: input.id || uid("stk"),
+      palletCode: code,
+      palletType: input.palletType,
+      qty,
+      locationKind: input.locationKind,
+      locationId: input.locationId,
+      note: input.note,
+      updatedTs: now,
+    });
   }
-  setStockRows(rows.filter((r) => r.qty !== 0));
+
+  setStock(all);
 }
 
-function incStock(palletType: string, kind: StockLocationKind, id: string, delta: number) {
-  const rows = getStockRows();
-  const idx = rows.findIndex((r) => r.palletType === palletType && r.locationKind === kind && r.locationId === id);
-  const cur = idx >= 0 ? rows[idx].qty : 0;
-  const next = cur + delta;
-  if (idx >= 0) rows[idx].qty = next;
-  else rows.push({ palletType, qty: next, locationKind: kind, locationId: id });
-  setStockRows(rows.filter((r) => r.qty !== 0));
+export function removeStockEntry(id: string) {
+  setStock(getStock().filter((x) => x.id !== id));
 }
 
-/**
- * Move “logico” + aggiornamento giacenze per tipo pedana.
- * - Se la pedana esiste nel registro, usa la sua location precedente come "from"
- * - Altrimenti from = to (nessuna scalata)
- */
-export function movePalletViaScan(args: {
-  palletId: string; // QR
-  palletType: string;
-  qty: number;
-  toKind: StockLocationKind;
-  toId: string;
-  note?: string;
-}) {
-  const qty = Math.max(1, Math.floor(args.qty || 1));
-  const palletType = (args.palletType || "EUR / EPAL").trim();
-
-  const pallets = getPallets();
-  const p = pallets.find((x) => x.id === args.palletId);
-
-  const fromKind: StockLocationKind = p?.location?.kind || args.toKind;
-  const fromId: string = p?.location?.id || args.toId;
-
-  // aggiorna stock: scala dal from SOLO se cambia location
-  if (fromKind !== args.toKind || fromId !== args.toId) {
-    incStock(palletType, fromKind, fromId, -qty);
-  }
-  incStock(palletType, args.toKind, args.toId, +qty);
-
-  // registra move
-  const moves = getStockMoves();
-  const mv: StockMove = {
-    id: uid("mv"),
-    ts: Date.now(),
-    palletType,
-    qty,
-    from: { kind: fromKind, id: fromId },
-    to: { kind: args.toKind, id: args.toId },
-    note: args.note,
-    palletId: args.palletId,
+export function getShopOptions() {
+  return {
+    shops: getShops(),
+    depots: getDepots(),
+    drivers: getDrivers(),
   };
-  setStockMoves([mv, ...moves].slice(0, 5000));
+}
 
-  // aggiorna registro pedane
+// “movePalletViaScan” usato dalla scan page: aggiorna pallet + stock + history
+export function movePalletViaScan(args: {
+  code: string;
+  source: "qr" | "manual";
+  lat?: number;
+  lng?: number;
+
+  palletType?: string;
+  qty?: number;
+
+  locationKind?: StockLocationKind;
+  locationId?: string;
+
+  note?: string;
+  altCode?: string;
+}) {
+  const code = (args.code || "").trim();
+  if (!code) return;
+
+  // 1) aggiorna pallet
   upsertPallet({
-    id: args.palletId,
-    type: palletType,
+    code,
+    type: args.palletType,
+    altCode: args.altCode,
+    notes: args.note,
     lastSeenTs: Date.now(),
-    location: { kind: args.toKind, id: args.toId },
-    note: args.note,
-    altCode: p?.altCode,
+    lastLat: args.lat,
+    lastLng: args.lng,
+    lastSource: args.source,
   });
 
-  return mv;
-}
+  // 2) aggiorna stock se location presente
+  if (args.locationKind && args.locationId) {
+    upsertStockEntry({
+      palletCode: code,
+      palletType: args.palletType,
+      qty: clampInt(args.qty, 1),
+      locationKind: args.locationKind,
+      locationId: args.locationId,
+      note: args.note,
+    });
+  }
 
-/* -------------------- HELPERS (nomi usati nelle pagine) -------------------- */
+  // 3) storico
+  addScanHistory({
+    code,
+    source: args.source,
+    lat: args.lat,
+    lng: args.lng,
+    palletType: args.palletType,
+    qty: args.qty,
+    locationKind: args.locationKind,
+    locationId: args.locationId,
+    note: args.note,
+  });
 
-export function formatDTShort(ts: number) {
-  return formatDT(ts);
-}
-
-/** alias compatibilità: alcuni file chiamavano getStockMoves/getStockRows già ok */
-
-/** utile per etichette UI */
-export function locationName(kind: StockLocationKind, id: string) {
-  if (kind === "DEPOSITO") return getDepotOptions().find((x) => x.id === id)?.name || "—";
-  if (kind === "AUTISTA") return getDrivers().find((x) => x.id === id)?.name || "—";
-  return getShopOptions().find((x) => x.id === id)?.name || "—";
+  // 4) ultimo scan
+  setLastScan(code);
 }
