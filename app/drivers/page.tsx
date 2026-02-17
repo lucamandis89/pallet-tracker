@@ -1,179 +1,83 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { addDriver, getDrivers, removeDriver, updateDriver, DriverItem } from "../lib/storage";
+import React, { useEffect, useMemo, useState } from "react";
+import { Driver, loadDB, saveDB, uid } from "../lib/db";
 
 export default function DriversPage() {
-  const [list, setList] = useState<DriverItem[]>(() => getDrivers());
+  const [items, setItems] = useState<Driver[]>([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [notes, setNotes] = useState("");
+  const [note, setNote] = useState("");
+  const [q, setQ] = useState("");
 
-  const count = useMemo(() => list.length, [list]);
+  useEffect(() => {
+    const db = loadDB();
+    setItems(db.drivers);
+  }, []);
 
-  function refresh() {
-    setList(getDrivers());
-  }
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter((x) => (x.name + " " + (x.phone || "")).toLowerCase().includes(s));
+  }, [items, q]);
 
-  function resetForm() {
-    setName("");
-    setPhone("");
-    setNotes("");
-  }
-
-  function onAdd() {
+  function add() {
     const n = name.trim();
-    if (!n) return alert("Inserisci il nome autista.");
-    try {
-      addDriver({ name: n, phone: phone.trim() || undefined, notes: notes.trim() || undefined });
-      refresh();
-      resetForm();
-    } catch (e: any) {
-      if (e?.message === "LIMIT_10") alert("Limite raggiunto: massimo 10 autisti.");
-      else alert("Errore: " + (e?.message || "sconosciuto"));
-    }
+    if (!n) return;
+    const db = loadDB();
+    const row: Driver = { id: uid("drv"), name: n, phone: phone.trim() || undefined, note: note.trim() || undefined, createdAt: Date.now() };
+    db.drivers.unshift(row);
+    saveDB(db);
+    setItems(db.drivers);
+    setName(""); setPhone(""); setNote("");
   }
 
-  function onEdit(item: DriverItem) {
-    const newName = prompt("Nome autista:", item.name);
-    if (newName === null) return;
-    const n = newName.trim();
-    if (!n) return alert("Nome non valido.");
-
-    const newPhone = prompt("Telefono (facoltativo):", item.phone || "") ?? item.phone || "";
-    const newNotes = prompt("Note (facoltative):", item.notes || "") ?? item.notes || "";
-
-    updateDriver(item.id, {
-      name: n,
-      phone: newPhone.trim() || undefined,
-      notes: newNotes.trim() || undefined,
-    });
-    refresh();
+  function remove(id: string) {
+    const db = loadDB();
+    db.drivers = db.drivers.filter((x) => x.id !== id);
+    saveDB(db);
+    setItems(db.drivers);
   }
-
-  function onDelete(item: DriverItem) {
-    if (!confirm(`Eliminare autista "${item.name}"?`)) return;
-    removeDriver(item.id);
-    refresh();
-  }
-
-  const input: React.CSSProperties = {
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid #ddd",
-    width: "100%",
-    fontWeight: 700,
-  };
-
-  const btn = (bg: string): React.CSSProperties => ({
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "none",
-    fontWeight: 900,
-    cursor: "pointer",
-    background: bg,
-    color: "white",
-  });
-
-  const card: React.CSSProperties = {
-    padding: 14,
-    borderRadius: 16,
-    border: "2px solid #1976d2",
-    background: "#e3f2fd",
-    marginTop: 12,
-  };
 
   return (
-    <div style={{ padding: 16, maxWidth: 760, margin: "0 auto" }}>
+    <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>🚚 Gestione Autisti</h1>
-      <p style={{ marginTop: 0, opacity: 0.85 }}>
-        Massimo <b>10 autisti</b>. Servono per assegnare le pedane quando sono in viaggio.
-      </p>
+      <a href="/" style={{ color: "#1e88e5", fontWeight: 700 }}>← Torna alla Home</a>
 
-      <div style={{ padding: 12, borderRadius: 12, background: "#f2f2f2", fontWeight: 900 }}>
-        Totale autisti: {count} / 10
-      </div>
-
-      <div style={card}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Aggiungi Autista</div>
-
-        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Nome *</div>
-            <input value={name} onChange={(e) => setName(e.target.value)} style={input} placeholder="Es: Mario Rossi" />
-          </div>
-
-          <div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Telefono</div>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              style={input}
-              placeholder="Facoltativo"
-              inputMode="tel"
-            />
-          </div>
-
-          <div>
-            <div style={{ fontWeight: 900, marginBottom: 6 }}>Note</div>
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} style={input} placeholder="Facoltative" />
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-          <button onClick={onAdd} style={btn("#2e7d32")}>
-            Salva Autista
-          </button>
-          <button onClick={resetForm} style={btn("#616161")}>
-            Svuota
-          </button>
+      <div style={{ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fff" }}>
+        <h2 style={{ marginTop: 0 }}>➕ Aggiungi autista</h2>
+        <div style={{ display: "grid", gap: 10 }}>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome e cognome" style={inp()} />
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefono (opzionale)" style={inp()} />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (opzionale)" style={inp()} />
+          <button onClick={add} style={btn("#1e88e5")}>Salva autista</button>
         </div>
       </div>
 
-      <div style={{ marginTop: 14 }}>
-        <h2 style={{ marginBottom: 8 }}>📋 Elenco</h2>
-
-        {list.length === 0 ? (
-          <div style={{ padding: 14, borderRadius: 14, border: "1px solid #ddd", background: "white" }}>
-            Nessun autista inserito.
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {list.map((d) => (
-              <div
-                key={d.id}
-                style={{
-                  padding: 14,
-                  borderRadius: 16,
-                  border: "1px solid #ddd",
-                  background: "white",
-                }}
-              >
-                <div style={{ fontSize: 18, fontWeight: 900 }}>{d.name}</div>
-                <div style={{ opacity: 0.85, marginTop: 4 }}>
-                  {d.phone ? <>📞 {d.phone} &nbsp; </> : null}
-                  {d.notes ? <>📝 {d.notes}</> : null}
-                </div>
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-                  <button onClick={() => onEdit(d)} style={btn("#1565c0")}>
-                    Modifica
-                  </button>
-                  <button onClick={() => onDelete(d)} style={btn("#c62828")}>
-                    Elimina
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <a href="/" style={{ fontWeight: 900, textDecoration: "none" }}>
-          ← Torna alla Home
-        </a>
+      <div style={{ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fff" }}>
+        <h2 style={{ marginTop: 0 }}>📋 Elenco</h2>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca..." style={inp()} />
+        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          {filtered.length === 0 ? <div style={{ opacity: 0.7 }}>Nessun autista.</div> : null}
+          {filtered.map((x) => (
+            <div key={x.id} style={card()}>
+              <div style={{ fontWeight: 800 }}>{x.name}</div>
+              <div style={{ opacity: 0.85 }}>{x.phone || "—"} {x.note ? `• ${x.note}` : ""}</div>
+              <button onClick={() => remove(x.id)} style={btn("#e53935")}>Elimina</button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
+}
+
+function inp(): React.CSSProperties {
+  return { padding: 12, borderRadius: 12, border: "1px solid #ddd", fontSize: 16 };
+}
+function btn(color: string): React.CSSProperties {
+  return { padding: 12, borderRadius: 12, border: "none", background: color, color: "white", fontWeight: 800, cursor: "pointer" };
+}
+function card(): React.CSSProperties {
+  return { padding: 12, borderRadius: 14, border: "1px solid #eee", display: "grid", gap: 8 };
 }
