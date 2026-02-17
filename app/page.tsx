@@ -1,3 +1,5 @@
+"use client";
+
 export default function HomePage() {
   const btnStyle = (bg: string) => ({
     width: "100%",
@@ -41,6 +43,14 @@ export default function HomePage() {
           📷 Scansiona QR Pedana
         </a>
 
+        <a href="/pallets" style={btnStyle("#2e7d32")}>
+          🧱 Registro Pedane
+        </a>
+
+        <a href="/stock" style={btnStyle("#6a1b9a")}>
+          📦 Giacenze (Stock)
+        </a>
+
         <a href="/drivers" style={btnStyle("#1e88e5")}>
           🚚 Gestione Autisti
         </a>
@@ -59,13 +69,19 @@ export default function HomePage() {
       </div>
 
       <div style={cardStyle}>
-        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>🔥 Funzione principale attiva:</div>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
+          🔥 Funzioni principali attive:
+        </div>
         <div style={{ lineHeight: 1.6 }}>
           ✅ Scansione QR pedana
           <br />
           ✅ Salvataggio posizione GPS
           <br />
-          ✅ Storico + Export CSV
+          ✅ Registro pedane (stato + posizione)
+          <br />
+          ✅ Giacenze per negozio + storico movimenti stock + Export CSV
+          <br />
+          ✅ Storico scansioni + Export CSV
         </div>
       </div>
     </div>
