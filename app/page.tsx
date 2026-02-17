@@ -51,6 +51,10 @@ export default function HomePage() {
           📦 Giacenze (Stock)
         </a>
 
+        <a href="/missing" style={btnStyle("#e53935")}>
+          🚨 Pedane Mancanti
+        </a>
+
         <a href="/drivers" style={btnStyle("#1e88e5")}>
           🚚 Gestione Autisti
         </a>
@@ -82,6 +86,8 @@ export default function HomePage() {
           ✅ Giacenze per negozio + storico movimenti stock + Export CSV
           <br />
           ✅ Storico scansioni + Export CSV
+          <br />
+          ✅ Pedane mancanti (fuori deposito da X giorni) + Export CSV
         </div>
       </div>
     </div>
