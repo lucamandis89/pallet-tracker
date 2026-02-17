@@ -49,6 +49,37 @@ export type ShopItem = {
   createdAt: number;
 };
 
+export type DepotItem = {
+  id: string;
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  notes?: string;
+  createdAt: number;
+};
+
+export type StockLocationKind = "DEPOSITO" | "NEGOZIO" | "AUTISTA";
+
+export type StockRow = {
+  locationKind: StockLocationKind;
+  locationId: string; // depId/shopId/driverId (o dep_default)
+  palletType: string; // EUR/EPAL, CHEP, IFCO ecc.
+  qty: number;
+};
+
+export type StockMove = {
+  id: string;
+  ts: number;
+  palletType: string;
+  qty: number;
+
+  from: { kind: StockLocationKind; id: string };
+  to: { kind: StockLocationKind; id: string };
+
+  note?: string;
+};
+
 /* ============================
    LOCAL STORAGE KEYS
 ============================ */
@@ -58,6 +89,9 @@ const KEY_PALLETS = "pt_pallets_v1";
 const KEY_LASTSCAN = "pt_lastscan_v1";
 const KEY_DRIVERS = "pt_drivers_v1";
 const KEY_SHOPS = "pt_shops_v1";
+const KEY_DEPOTS = "pt_depots_v1";
+const KEY_STOCK = "pt_stock_v1";
+const KEY_STOCK_MOVES = "pt_stock_moves_v1";
 
 /* ============================
    UTILS
@@ -171,7 +205,7 @@ export function upsertPallet(update: Partial<PalletItem> & { code: string }) {
 }
 
 /* ============================
-   DRIVERS (AUTISTI)
+   DRIVERS (AUTISTI) max 10
 ============================ */
 
 export function getDrivers(): DriverItem[] {
@@ -212,7 +246,7 @@ export function removeDriver(id: string) {
 }
 
 /* ============================
-   SHOPS (NEGOZI)
+   SHOPS (NEGOZI) max 100
 ============================ */
 
 export function getShops(): ShopItem[] {
@@ -250,4 +284,102 @@ export function updateShop(id: string, patch: Partial<ShopItem>) {
 
 export function removeShop(id: string) {
   setShops(getShops().filter((x) => x.id !== id));
+}
+
+/* ============================
+   DEPOTS (DEPOSITI)
+   Se non ne hai, esiste sempre dep_default
+============================ */
+
+const DEFAULT_DEPOT_ID = "dep_default";
+
+export function getDepots(): DepotItem[] {
+  if (typeof window === "undefined") return [];
+  const list = safeParse<DepotItem[]>(localStorage.getItem(KEY_DEPOTS), []);
+  // non salvo il default qui, lo gestisco in UI (sempre disponibile)
+  return list;
+}
+
+export function setDepots(items: DepotItem[]) {
+  localStorage.setItem(KEY_DEPOTS, JSON.stringify(items));
+}
+
+export function getDefaultDepot(): DepotItem {
+  return {
+    id: DEFAULT_DEPOT_ID,
+    name: "Deposito Principale",
+    createdAt: 0,
+  };
+}
+
+export function getDepotOptions(): DepotItem[] {
+  return [getDefaultDepot(), ...getDepots()];
+}
+
+/* ============================
+   STOCK
+============================ */
+
+function stockKey(kind: StockLocationKind, id: string, palletType: string) {
+  return `${kind}::${id}::${palletType}`;
+}
+
+export function getStockRows(): StockRow[] {
+  if (typeof window === "undefined") return [];
+  return safeParse<StockRow[]>(localStorage.getItem(KEY_STOCK), []);
+}
+
+export function setStockRows(rows: StockRow[]) {
+  localStorage.setItem(KEY_STOCK, JSON.stringify(rows));
+}
+
+export function getStockMoves(): StockMove[] {
+  if (typeof window === "undefined") return [];
+  return safeParse<StockMove[]>(localStorage.getItem(KEY_STOCK_MOVES), []);
+}
+
+export function setStockMoves(moves: StockMove[]) {
+  localStorage.setItem(KEY_STOCK_MOVES, JSON.stringify(moves));
+}
+
+export function getStockQty(kind: StockLocationKind, id: string, palletType: string): number {
+  const rows = getStockRows();
+  const k = stockKey(kind, id, palletType);
+  const row = rows.find((r) => stockKey(r.locationKind, r.locationId, r.palletType) === k);
+  return row?.qty ?? 0;
+}
+
+export function applyStockDelta(kind: StockLocationKind, id: string, palletType: string, delta: number) {
+  const rows = getStockRows();
+  const k = stockKey(kind, id, palletType);
+
+  const idx = rows.findIndex((r) => stockKey(r.locationKind, r.locationId, r.palletType) === k);
+  if (idx >= 0) {
+    rows[idx] = { ...rows[idx], qty: (rows[idx].qty ?? 0) + delta };
+  } else {
+    rows.push({ locationKind: kind, locationId: id, palletType, qty: delta });
+  }
+
+  // pulizia: se qty è 0 o sotto 0, lascio comunque (così vedi errori operativi)
+  setStockRows(rows);
+}
+
+export function addStockMove(input: Omit<StockMove, "id" | "ts"> & { ts?: number }) {
+  const ts = input.ts ?? Date.now();
+  const m: StockMove = { id: uid("stk"), ts, ...input };
+
+  // Validazioni “anti casino”
+  if (!m.palletType?.trim()) throw new Error("PALLET_TYPE_REQUIRED");
+  if (!Number.isFinite(m.qty) || m.qty <= 0) throw new Error("QTY_INVALID");
+  if (!m.from?.kind || !m.from.id) throw new Error("FROM_INVALID");
+  if (!m.to?.kind || !m.to.id) throw new Error("TO_INVALID");
+
+  // Applica delta: tolgo da FROM, aggiungo a TO
+  applyStockDelta(m.from.kind, m.from.id, m.palletType, -m.qty);
+  applyStockDelta(m.to.kind, m.to.id, m.palletType, +m.qty);
+
+  const moves = getStockMoves();
+  moves.unshift(m);
+  setStockMoves(moves.slice(0, 5000));
+  return m;
 }
