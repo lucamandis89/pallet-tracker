@@ -1,75 +1,190 @@
-// app/depots/page.tsx
 "use client";
 
-import React, { useState } from "react";
-import { addDepot, getDepots, removeDepot, updateDepot, DepotItem } from "../lib/storage";
+import React, { useMemo, useState } from "react";
+import {
+  addDepot,
+  getDefaultDepot,
+  getDepots,
+  removeDepot,
+  setDefaultDepot,
+  updateDepot,
+  type DepotItem,
+} from "../lib/storage";
 
 export default function DepotsPage() {
-  const [refresh, setRefresh] = useState(0);
+  const [list, setList] = useState<DepotItem[]>(() => getDepots());
+  const [def, setDef] = useState<string>(() => getDefaultDepot());
+
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [note, setNote] = useState("");
+  const [lat, setLat] = useState<string>("");
+  const [lng, setLng] = useState<string>("");
 
-  const list = getDepots();
+  const styles = useMemo(() => {
+    const input = {
+      width: "100%",
+      padding: 12,
+      borderRadius: 12,
+      border: "1px solid #ddd",
+      fontSize: 16,
+      outline: "none",
+    } as const;
+
+    const btn = (bg: string) =>
+      ({
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: "none",
+        fontWeight: 900,
+        cursor: "pointer",
+        background: bg,
+        color: "white",
+      } as const);
+
+    return { input, btn };
+  }, []);
+
+  function reload() {
+    setList(getDepots());
+    setDef(getDefaultDepot());
+  }
+
+  function captureGps() {
+    if (!navigator.geolocation) {
+      alert("Geolocalizzazione non supportata.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLat(String(pos.coords.latitude));
+        setLng(String(pos.coords.longitude));
+      },
+      () => alert("Permesso GPS negato o posizione non disponibile."),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
 
   function add() {
-    addDepot(name, address);
+    if (!name.trim()) return alert("Inserisci il nome deposito.");
+    addDepot({
+      name: name.trim(),
+      address: address.trim() || undefined,
+      city: city.trim() || undefined,
+      note: note.trim() || undefined,
+      lat: lat ? Number(lat) : undefined,
+      lng: lng ? Number(lng) : undefined,
+    });
     setName("");
     setAddress("");
-    setRefresh((x) => x + 1);
+    setCity("");
+    setNote("");
+    setLat("");
+    setLng("");
+    reload();
   }
 
   function edit(d: DepotItem) {
-    const n = prompt("Nome deposito", d.name) ?? d.name;
-    const a = prompt("Indirizzo (opz.)", d.address ?? "") ?? (d.address ?? "");
-    updateDepot({ ...d, name: n.trim() || d.name, address: a.trim() || "" });
-    setRefresh((x) => x + 1);
+    const newName = (prompt("Nome deposito:", d.name) ?? d.name).trim();
+    const newAddress = (prompt("Indirizzo:", d.address ?? "") ?? (d.address ?? "")).trim();
+    const newCity = (prompt("Città:", d.city ?? "") ?? (d.city ?? "")).trim();
+    const newNote = (prompt("Note:", d.note ?? "") ?? (d.note ?? "")).trim();
+
+    updateDepot(d.id, {
+      name: newName || d.name,
+      address: newAddress || undefined,
+      city: newCity || undefined,
+      note: newNote || undefined,
+    });
+    reload();
   }
 
   function del(id: string) {
-    if (!confirm("Eliminare questo deposito?")) return;
+    if (!confirm("Eliminare deposito?")) return;
     removeDepot(id);
-    setRefresh((x) => x + 1);
+    reload();
+  }
+
+  function setDefault(id: string) {
+    setDefaultDepot(id);
+    reload();
   }
 
   return (
     <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>🏭 Depositi</h1>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <a href="/" style={link()}>← Home</a>
-        <a href="/scan" style={link()}>Scanner</a>
+      <h1 style={{ margin: 0, fontSize: 32 }}>🏭 Depositi</h1>
+      <div style={{ marginTop: 10 }}>
+        <a href="/" style={{ color: "#1e88e5", fontWeight: 800, textDecoration: "none" }}>
+          ← Home
+        </a>
       </div>
 
-      <div style={box()}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Aggiungi deposito</div>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" style={inp()} />
-        <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Indirizzo (opz.)" style={inp()} />
-        <button onClick={add} style={btn("#2e7d32")}>Aggiungi</button>
-      </div>
+      <div
+        style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 16,
+          border: "1px solid #e6e6e6",
+          background: "white",
+        }}
+      >
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Aggiungi deposito</div>
 
-      <div style={box()}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Elenco</div>
-        {list.length === 0 ? <div style={{ opacity: 0.7 }}>Nessun deposito.</div> : null}
         <div style={{ display: "grid", gap: 10 }}>
-          {list.map((d) => (
-            <div key={d.id} style={card()}>
-              <div style={{ fontWeight: 900 }}>{d.name}</div>
-              {d.address ? <div style={{ opacity: 0.8 }}>{d.address}</div> : null}
-              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                <button onClick={() => edit(d)} style={btn("#455a64")}>Modifica</button>
-                <button onClick={() => del(d.id)} style={btn("#e53935")}>Elimina</button>
-              </div>
-            </div>
-          ))}
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome deposito" style={styles.input} />
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Indirizzo (opz.)" style={styles.input} />
+          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città (opz.)" style={styles.input} />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (opz.)" style={styles.input} />
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="Latitudine (opz.)" style={{ ...styles.input, flex: "1 1 180px" }} />
+            <input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="Longitudine (opz.)" style={{ ...styles.input, flex: "1 1 180px" }} />
+            <button onClick={captureGps} style={styles.btn("#6a1b9a")}>📍 Prendi GPS</button>
+          </div>
+
+          <button onClick={add} style={styles.btn("#fb8c00")}>+ Aggiungi deposito</button>
         </div>
       </div>
-      <div style={{ opacity: 0, height: 1 }}>{refresh}</div>
+
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        {list.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Nessun deposito inserito.</div>
+        ) : (
+          list.map((d) => (
+            <div
+              key={d.id}
+              style={{
+                padding: 14,
+                borderRadius: 16,
+                border: "1px solid #e6e6e6",
+                background: "white",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>
+                    {d.name} {def === d.id ? "⭐" : ""}
+                  </div>
+                  <div style={{ opacity: 0.8 }}>
+                    {d.address || "—"} {d.city ? `· ${d.city}` : ""}
+                  </div>
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>
+                    GPS: {d.lat ?? "—"} / {d.lng ?? "—"}
+                  </div>
+                  {d.note ? <div style={{ marginTop: 6 }}>{d.note}</div> : null}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 130 }}>
+                  <button onClick={() => edit(d)} style={styles.btn("#1e88e5")}>Modifica</button>
+                  <button onClick={() => setDefault(d.id)} style={styles.btn("#0b1220")}>Default</button>
+                  <button onClick={() => del(d.id)} style={styles.btn("#e53935")}>Elimina</button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
-
-const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 12, borderRadius: 14, border: "1px solid #eee" });
-const inp = (): React.CSSProperties => ({ padding: 12, borderRadius: 12, border: "1px solid #ddd", width: "100%", marginBottom: 10, fontWeight: 800 });
-const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
-const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
