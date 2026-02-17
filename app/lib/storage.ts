@@ -253,8 +253,14 @@ export function removeDriver(id: string) {
 }
 
 /* ============================
-   SHOPS max 100
+   SHOPS max 100 + DEFAULT
 ============================ */
+
+const DEFAULT_SHOP_ID = "shop_default";
+
+export function getDefaultShop(): ShopItem {
+  return { id: DEFAULT_SHOP_ID, name: "Negozio Principale", createdAt: 0 };
+}
 
 export function getShops(): ShopItem[] {
   if (typeof window === "undefined") return [];
@@ -263,6 +269,10 @@ export function getShops(): ShopItem[] {
 
 export function setShops(items: ShopItem[]) {
   localStorage.setItem(KEY_SHOPS, JSON.stringify(items));
+}
+
+export function getShopOptions(): ShopItem[] {
+  return [getDefaultShop(), ...getShops()];
 }
 
 export function addShop(data: Omit<ShopItem, "id" | "createdAt">) {
