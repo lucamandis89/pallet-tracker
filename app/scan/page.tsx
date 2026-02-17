@@ -1,148 +1,130 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export default function ScanPage() {
-  const [qrCode, setQrCode] = useState("");
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [palletId, setPalletId] = useState("");
+  const [location, setLocation] = useState<string>("Nessuna posizione salvata");
+  const [status, setStatus] = useState<string>("");
 
-  // prende GPS
-  const getLocation = () => {
-    if (!navigator.geolocation) {
-      alert("GPS non supportato su questo dispositivo.");
+  const handleFakeScan = () => {
+    const fakeCode = "PALLET-" + Math.floor(Math.random() * 100000);
+    setPalletId(fakeCode);
+    setStatus("✅ QR letto con successo: " + fakeCode);
+  };
+
+  const handleSaveLocation = () => {
+    if (!palletId) {
+      setStatus("❌ Prima scansiona un QR!");
       return;
     }
 
+    if (!navigator.geolocation) {
+      setStatus("❌ Il GPS non è supportato su questo dispositivo.");
+      return;
+    }
+
+    setStatus("📍 Recupero posizione GPS...");
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        const newLocation = `📦 ${palletId} → Lat: ${lat.toFixed(
+          6
+        )}, Lng: ${lng.toFixed(6)}`;
+
+        setLocation(newLocation);
+        setStatus("✅ Posizione salvata con successo!");
+
+        // Qui in futuro potrai salvare i dati su database (Firebase, Supabase ecc.)
       },
       () => {
-        alert("Permesso GPS negato o errore GPS.");
+        setStatus("❌ Errore nel recupero della posizione.");
       }
     );
   };
 
-  useEffect(() => {
-    getLocation();
-  }, []);
-
-  const handleSubmit = async () => {
-    if (!qrCode) {
-      alert("Inserisci o scansiona un codice QR.");
-      return;
-    }
-
-    if (!location) {
-      alert("GPS non disponibile. Attiva la localizzazione.");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      // simulazione salvataggio
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      setStatus(
-        `✅ Pedana aggiornata!\nQR: ${qrCode}\nPosizione: ${location.lat}, ${location.lng}`
-      );
-    } catch (err) {
-      setStatus("❌ Errore nel salvataggio.");
-    }
-
-    setLoading(false);
-  };
-
   return (
     <main style={{ padding: 20, fontFamily: "Arial, sans-serif" }}>
-      <h1 style={{ fontSize: 24, fontWeight: "bold" }}>📦 Pallet Tracker - Scan QR</h1>
+      <h1 style={{ fontSize: 24, fontWeight: "bold" }}>📷 Scan QR Pallet</h1>
 
       <p style={{ marginTop: 10 }}>
-        Inserisci il codice QR della pedana (o scannerizzalo con la fotocamera).
+        Questa pagina serve per leggere un QR Code e salvare la posizione GPS
+        della pedana.
       </p>
 
-      <input
-        type="text"
-        placeholder="Inserisci codice QR..."
-        value={qrCode}
-        onChange={(e) => setQrCode(e.target.value)}
-        style={{
-          width: "100%",
-          padding: 12,
-          marginTop: 10,
-          borderRadius: 10,
-          border: "1px solid #ccc",
-          fontSize: 16,
-        }}
-      />
-
-      <button
-        onClick={handleSubmit}
-        disabled={loading}
-        style={{
-          marginTop: 15,
-          width: "100%",
-          padding: 14,
-          borderRadius: 12,
-          border: "none",
-          background: "#0f172a",
-          color: "white",
-          fontSize: 16,
-          fontWeight: "bold",
-          cursor: "pointer",
-        }}
-      >
-        {loading ? "Salvataggio..." : "📍 Salva posizione pedana"}
-      </button>
-
-      <button
-        onClick={getLocation}
-        style={{
-          marginTop: 10,
-          width: "100%",
-          padding: 14,
-          borderRadius: 12,
-          border: "1px solid #0f172a",
-          background: "white",
-          color: "#0f172a",
-          fontSize: 16,
-          fontWeight: "bold",
-          cursor: "pointer",
-        }}
-      >
-        🔄 Aggiorna GPS
-      </button>
-
       <div style={{ marginTop: 20 }}>
-        <h2 style={{ fontSize: 18, fontWeight: "bold" }}>📡 Posizione attuale</h2>
-        {location ? (
-          <p>
-            Lat: <b>{location.lat}</b> <br />
-            Lng: <b>{location.lng}</b>
-          </p>
-        ) : (
-          <p>❌ GPS non disponibile</p>
-        )}
+        <button
+          onClick={handleFakeScan}
+          style={{
+            padding: 14,
+            width: "100%",
+            borderRadius: 12,
+            border: "none",
+            background: "#0f172a",
+            color: "white",
+            fontWeight: "bold",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          📷 Simula Lettura QR
+        </button>
+      </div>
+
+      <div style={{ marginTop: 15 }}>
+        <input
+          value={palletId}
+          onChange={(e) => setPalletId(e.target.value)}
+          placeholder="Codice pallet..."
+          style={{
+            padding: 12,
+            width: "100%",
+            borderRadius: 12,
+            border: "1px solid #ccc",
+            fontSize: 16,
+          }}
+        />
+      </div>
+
+      <div style={{ marginTop: 15 }}>
+        <button
+          onClick={handleSaveLocation}
+          style={{
+            padding: 14,
+            width: "100%",
+            borderRadius: 12,
+            border: "none",
+            background: "#16a34a",
+            color: "white",
+            fontWeight: "bold",
+            fontSize: 16,
+            cursor: "pointer",
+          }}
+        >
+          📍 Salva Posizione GPS
+        </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: 20,
+          padding: 14,
+          borderRadius: 12,
+          background: "#f1f5f9",
+          fontSize: 15,
+        }}
+      >
+        <strong>📌 Ultima posizione:</strong>
+        <p style={{ marginTop: 8 }}>{location}</p>
       </div>
 
       {status && (
-        <pre
-          style={{
-            marginTop: 20,
-            background: "#f3f4f6",
-            padding: 15,
-            borderRadius: 10,
-            whiteSpace: "pre-wrap",
-          }}
-        >
+        <p style={{ marginTop: 15, fontWeight: "bold", color: "#0f172a" }}>
           {status}
-        </pre>
+        </p>
       )}
     </main>
   );
