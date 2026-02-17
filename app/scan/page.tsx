@@ -40,7 +40,7 @@ export default function ScanPage() {
 
   const drivers = useMemo(() => getDrivers(), []);
   const shops = useMemo(() => getShopOptions(), []);
-  const depot = getDefaultDepot();
+  const depot = useMemo(() => getDefaultDepot(), []);
 
   const config = useMemo(
     () => ({
@@ -54,8 +54,9 @@ export default function ScanPage() {
 
   async function getGps(): Promise<{ lat?: number; lng?: number; accuracy?: number }> {
     return new Promise((resolve) => {
-      if (typeof navigator === "l
-      ode || !navigator.geolocation) return resolve({});
+      // ✅ FIX: la tua riga era corrotta, qui è corretta e stabile
+      if (typeof navigator === "undefined" || !navigator.geolocation) return resolve({});
+
       navigator.geolocation.getCurrentPosition(
         (pos) =>
           resolve({
@@ -104,6 +105,7 @@ export default function ScanPage() {
     const gps = await getGps();
     const ts = Date.now();
 
+    // Storico base: “ho letto/salvato questo codice”
     addHistory({
       code: clean,
       ts,
@@ -115,11 +117,13 @@ export default function ScanPage() {
 
     setLastScan(clean);
 
+    // Registro pedane: aggiorna ultimo avvistamento
     upsertPallet({
       code: clean,
       lastSeenTs: ts,
       lastLat: gps.lat,
       lastLng: gps.lng,
+      lastAccuracy: gps.accuracy,
       lastSource: source,
     });
   }
@@ -132,6 +136,7 @@ export default function ScanPage() {
     setStatus(source === "qr" ? "✅ QR letto correttamente!" : "✅ Salvato manualmente!");
     await persistBasicScan(clean, source);
 
+    // apre subito la form aggiornamento stock/posizione
     setShowUpdate(true);
     setToId((prev) => prev || ensureToId(toKind));
   }
@@ -165,6 +170,7 @@ export default function ScanPage() {
       setIsRunning(true);
     } catch (e) {
       console.error(e);
+      // fallback
       try {
         setStatus("⚠️ Riprovo con camera posteriore...");
         await qrRef.current?.start(
@@ -243,6 +249,8 @@ export default function ScanPage() {
       });
 
       const gps = await getGps();
+
+      // Storico “operativo”: ho spostato/registrato stock
       addHistory({
         code: lastResult,
         ts: Date.now(),
@@ -254,6 +262,20 @@ export default function ScanPage() {
         declaredId: to.id,
         palletType,
         qty: qn,
+        note: note.trim() || undefined,
+      });
+
+      // Registro pedane: salva anche destinazione attuale + GPS
+      upsertPallet({
+        code: lastResult,
+        type: palletType,
+        lastSeenTs: Date.now(),
+        lastLat: gps.lat,
+        lastLng: gps.lng,
+        lastAccuracy: gps.accuracy,
+        lastSource: "qr",
+        lastLocKind: to.kind,
+        lastLocId: to.id,
       });
 
       setStatus(`✅ Aggiornato Stock: ${from.kind} → ${to.kind}`);
@@ -278,25 +300,25 @@ export default function ScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toKind]);
 
-  const input = {
+  const input: React.CSSProperties = {
     padding: 12,
     borderRadius: 12,
     border: "1px solid #ddd",
     width: "100%",
-    fontWeight: 700 as const,
+    fontWeight: 700,
   };
 
-  const btn = (bg: string) => ({
+  const btn = (bg: string): React.CSSProperties => ({
     padding: "12px 14px",
     borderRadius: 12,
     border: "none",
-    fontWeight: 900 as const,
+    fontWeight: 900,
     cursor: "pointer",
     background: bg,
     color: "white",
   });
 
-  const card = (bg: string, border: string) => ({
+  const card = (bg: string, border: string): React.CSSProperties => ({
     padding: 14,
     borderRadius: 16,
     background: bg,
@@ -373,7 +395,7 @@ export default function ScanPage() {
           <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
             <div>
               <div style={{ fontWeight: 900, marginBottom: 6 }}>Tipo pedana</div>
-              <select value={palletType} onChange={(e) => setPalletType(e.target.value)} style={input as any}>
+              <select value={palletType} onChange={(e) => setPalletType(e.target.value)} style={input}>
                 {PALLET_TYPES.map((t) => (
                   <option key={t} value={t}>
                     {t}
@@ -396,7 +418,7 @@ export default function ScanPage() {
 
             <div>
               <div style={{ fontWeight: 900, marginBottom: 6 }}>Dove si trova ORA?</div>
-              <select value={toKind} onChange={(e) => setToKind(e.target.value as any)} style={input as any}>
+              <select value={toKind} onChange={(e) => setToKind(e.target.value as any)} style={input}>
                 <option value="DEPOSITO">Deposito</option>
                 <option value="NEGOZIO">Negozio</option>
                 <option value="AUTISTA">Autista</option>
@@ -405,7 +427,7 @@ export default function ScanPage() {
 
             <div>
               <div style={{ fontWeight: 900, marginBottom: 6 }}>Seleziona</div>
-              <select value={toId} onChange={(e) => setToId(e.target.value)} style={input as any}>
+              <select value={toId} onChange={(e) => setToId(e.target.value)} style={input}>
                 {optionsFor(toKind).map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.label}
@@ -430,6 +452,10 @@ export default function ScanPage() {
             <button onClick={() => setShowUpdate(false)} style={btn("#616161")}>
               Più tardi
             </button>
+
+            <a href="/history" style={{ ...btn("#6a1b9a"), textDecoration: "none", display: "inline-flex" }}>
+              Apri Storico
+            </a>
             <a href="/stock" style={{ ...btn("#6a1b9a"), textDecoration: "none", display: "inline-flex" }}>
               Apri Stock
             </a>
@@ -438,6 +464,9 @@ export default function ScanPage() {
       ) : null}
 
       <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <a href="/history" style={{ textDecoration: "none", fontWeight: 900 }}>
+          📌 Storico
+        </a>
         <a href="/stock" style={{ textDecoration: "none", fontWeight: 900 }}>
           📦 Stock
         </a>
