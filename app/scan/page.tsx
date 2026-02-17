@@ -1,106 +1,73 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Html5Qrcode } from "html5-qrcode";
+import { useEffect, useState } from "react";
+import { Html5QrcodeScanner } from "html5-qrcode";
+import Link from "next/link";
 
 export default function ScanPage() {
-  const [status, setStatus] = useState("📷 Inquadra il QR della pedana");
-  const [scanning, setScanning] = useState(false);
-  const [lastQr, setLastQr] = useState<string | null>(null);
-
-  const qrRef = useRef<Html5Qrcode | null>(null);
+  const [result, setResult] = useState<string>("");
+  const [status, setStatus] = useState<string>("📷 Inquadra il QR della pedana");
+  const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
+  const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    return () => {
-      if (qrRef.current) {
-        qrRef.current.stop().catch(() => {});
-        qrRef.current.clear().catch(() => {});
-      }
-    };
-  }, []);
+    let scanner: Html5QrcodeScanner | null = null;
 
-  const startScan = async () => {
-    if (scanning) return;
-
-    setStatus("📷 Avvio fotocamera...");
-    setScanning(true);
-
-    try {
-      if (!qrRef.current) {
-        qrRef.current = new Html5Qrcode("reader");
-      }
-
+    const startScanner = () => {
       const config = {
         fps: 10,
         qrbox: { width: 260, height: 260 },
       };
 
-      await qrRef.current.start(
-        { facingMode: "environment" },
-        config,
-        async (decodedText) => {
-          if (!decodedText) return;
+      scanner = new Html5QrcodeScanner("reader", config, false);
 
-          setLastQr(decodedText);
-          setStatus(`✅ QR letto: ${decodedText}`);
+      scanner.render(
+        (decodedText) => {
+          setResult(decodedText);
+          setStatus("✅ QR letto correttamente!");
 
-          // prova a salvare posizione GPS
-          if ("geolocation" in navigator) {
+          if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
               (pos) => {
                 const lat = pos.coords.latitude;
-                const lon = pos.coords.longitude;
+                const lng = pos.coords.longitude;
 
-                const data = {
+                setGps({ lat, lng });
+                setStatus("📍 Posizione GPS salvata!");
+
+                const savedData = {
                   qr: decodedText,
                   lat,
-                  lon,
-                  timestamp: new Date().toISOString(),
+                  lng,
+                  time: new Date().toISOString(),
                 };
 
-                console.log("POSIZIONE SALVATA:", data);
+                const old = localStorage.getItem("scan_history");
+                const history = old ? JSON.parse(old) : [];
+                history.unshift(savedData);
 
-                setStatus(
-                  `✅ QR letto: ${decodedText}\n📍 GPS salvato: ${lat.toFixed(
-                    6
-                  )}, ${lon.toFixed(6)}`
-                );
+                localStorage.setItem("scan_history", JSON.stringify(history));
               },
               () => {
-                setStatus(`✅ QR letto: ${decodedText}\n⚠️ GPS non disponibile`);
+                setError("⚠️ GPS non disponibile o permesso negato.");
               }
             );
           } else {
-            setStatus(`✅ QR letto: ${decodedText}\n⚠️ GPS non supportato`);
+            setError("⚠️ Geolocalizzazione non supportata.");
           }
         },
         () => {}
       );
-    } catch (err) {
-      console.error(err);
-      setStatus("❌ Errore avvio scanner. Controlla permessi fotocamera.");
-      setScanning(false);
-    }
-  };
+    };
 
-  const stopScan = async () => {
-    try {
-      if (qrRef.current) {
-        await qrRef.current.stop();
-        await qrRef.current.clear();
+    startScanner();
+
+    return () => {
+      if (scanner) {
+        scanner.clear().catch(() => {});
       }
-    } catch (err) {
-      console.log(err);
-    }
-
-    setScanning(false);
-    setStatus("🛑 Scanner fermato");
-  };
-
-  const reset = () => {
-    setLastQr(null);
-    setStatus("📷 Inquadra il QR della pedana");
-  };
+    };
+  }, []);
 
   return (
     <div style={{ padding: "20px", fontFamily: "Arial, sans-serif" }}>
@@ -108,110 +75,91 @@ export default function ScanPage() {
         📷 Scanner QR Pedane
       </h1>
 
-      <p style={{ fontSize: "18px" }}>
-        Scansiona il QR della pedana. La posizione GPS verrà salvata
-        automaticamente.
+      <p style={{ fontSize: "18px", marginTop: "10px" }}>
+        Scansiona il QR della pedana. La posizione GPS verrà salvata automaticamente.
       </p>
 
       <div
         style={{
-          background: "#f1f5f9",
+          marginTop: "20px",
           padding: "15px",
           borderRadius: "12px",
-          marginTop: "15px",
+          border: "1px solid #ccc",
+          background: "#f7f7f7",
           fontSize: "18px",
-          whiteSpace: "pre-line",
         }}
       >
         <b>Stato:</b> {status}
       </div>
 
       <div style={{ marginTop: "20px" }}>
-        <button
-          onClick={startScan}
-          disabled={scanning}
+        <div
+          id="reader"
           style={{
-            padding: "14px 20px",
-            fontSize: "18px",
+            width: "100%",
+            maxWidth: "450px",
+            margin: "0 auto",
             borderRadius: "12px",
-            border: "none",
-            background: scanning ? "#94a3b8" : "#16a34a",
-            color: "white",
-            cursor: scanning ? "not-allowed" : "pointer",
-            marginRight: "10px",
+            overflow: "hidden",
           }}
-        >
-          ▶ Avvia Scanner
-        </button>
-
-        <button
-          onClick={stopScan}
-          style={{
-            padding: "14px 20px",
-            fontSize: "18px",
-            borderRadius: "12px",
-            border: "none",
-            background: "#dc2626",
-            color: "white",
-            cursor: "pointer",
-            marginRight: "10px",
-          }}
-        >
-          ⛔ Ferma
-        </button>
-
-        <button
-          onClick={reset}
-          style={{
-            padding: "14px 20px",
-            fontSize: "18px",
-            borderRadius: "12px",
-            border: "none",
-            background: "#2563eb",
-            color: "white",
-            cursor: "pointer",
-          }}
-        >
-          🔄 Reset
-        </button>
+        ></div>
       </div>
 
-      <div
-        id="reader"
-        style={{
-          width: "100%",
-          maxWidth: "500px",
-          marginTop: "25px",
-          borderRadius: "12px",
-          overflow: "hidden",
-        }}
-      ></div>
-
-      {lastQr && (
+      {result && (
         <div
           style={{
             marginTop: "20px",
             padding: "15px",
             borderRadius: "12px",
-            background: "#e0f2fe",
-            fontSize: "18px",
+            border: "1px solid #16a34a",
+            background: "#dcfce7",
           }}
         >
-          <b>Ultimo QR letto:</b> {lastQr}
+          <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
+            ✅ QR Rilevato:
+          </h2>
+          <p style={{ fontSize: "18px" }}>{result}</p>
+        </div>
+      )}
+
+      {gps && (
+        <div
+          style={{
+            marginTop: "20px",
+            padding: "15px",
+            borderRadius: "12px",
+            border: "1px solid #2563eb",
+            background: "#dbeafe",
+          }}
+        >
+          <h2 style={{ fontSize: "20px", fontWeight: "bold" }}>
+            📍 GPS Salvato:
+          </h2>
+          <p style={{ fontSize: "18px" }}>
+            Lat: {gps.lat} <br />
+            Lng: {gps.lng}
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <div
+          style={{
+            marginTop: "20px",
+            padding: "15px",
+            borderRadius: "12px",
+            border: "1px solid #dc2626",
+            background: "#fee2e2",
+          }}
+        >
+          <b>Errore:</b> {error}
         </div>
       )}
 
       <div style={{ marginTop: "25px" }}>
-        <a
-          href="/"
-          style={{
-            fontSize: "18px",
-            color: "#2563eb",
-            textDecoration: "none",
-          }}
-        >
+        <Link href="/" style={{ fontSize: "18px", color: "#2563eb" }}>
           ← Torna alla Home
-        </a>
+        </Link>
       </div>
     </div>
   );
