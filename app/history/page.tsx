@@ -15,9 +15,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     const saved = localStorage.getItem("pallet_history");
-    if (saved) {
-      setHistory(JSON.parse(saved));
-    }
+    if (saved) setHistory(JSON.parse(saved));
   }, []);
 
   function clearHistory() {
@@ -34,7 +32,7 @@ export default function HistoryPage() {
       ) : (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-            <p style={{ fontWeight: 700 }}>Totale scansioni: {history.length}</p>
+            <p style={{ fontWeight: 900 }}>Totale scansioni: {history.length}</p>
 
             <button
               onClick={clearHistory}
@@ -44,7 +42,7 @@ export default function HistoryPage() {
                 border: "none",
                 background: "#e53935",
                 color: "white",
-                fontWeight: 800,
+                fontWeight: 900,
                 cursor: "pointer",
               }}
             >
@@ -66,14 +64,15 @@ export default function HistoryPage() {
               <div style={{ fontWeight: 900, fontSize: 18 }}>📦 {item.code}</div>
               <div style={{ marginTop: 6, fontSize: 14 }}>🕒 {item.date}</div>
 
-              {item.lat && item.lng ? (
+              {typeof item.lat === "number" && typeof item.lng === "number" ? (
                 <div style={{ marginTop: 6, fontSize: 14 }}>
                   📍 GPS: {item.lat}, {item.lng}
                   <br />
                   <a
                     href={`https://www.google.com/maps?q=${item.lat},${item.lng}`}
                     target="_blank"
-                    style={{ fontWeight: 800 }}
+                    rel="noreferrer"
+                    style={{ fontWeight: 900 }}
                   >
                     Apri su Google Maps
                   </a>
