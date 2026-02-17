@@ -1,8 +1,10 @@
 "use client";
 
 /* ============================
-   TIPI DATI
+   TIPI
 ============================ */
+
+export type StockLocationKind = "DEPOSITO" | "NEGOZIO" | "AUTISTA";
 
 export type ScanEvent = {
   id: string;
@@ -12,6 +14,12 @@ export type ScanEvent = {
   lng?: number;
   accuracy?: number;
   source: "qr" | "manual";
+
+  // nuovo: dove l’ho dichiarata dopo scansione (facoltativo)
+  declaredKind?: StockLocationKind;
+  declaredId?: string;
+  palletType?: string;
+  qty?: number;
 };
 
 export type PalletItem = {
@@ -20,10 +28,15 @@ export type PalletItem = {
   altCode?: string;
   type?: string;
   notes?: string;
+
   lastSeenTs?: number;
   lastLat?: number;
   lastLng?: number;
   lastSource?: "qr" | "manual";
+
+  // nuovo: ultima posizione “logistica” dichiarata
+  lastLocKind?: StockLocationKind;
+  lastLocId?: string;
 };
 
 export type DriverItem = {
@@ -59,12 +72,10 @@ export type DepotItem = {
   createdAt: number;
 };
 
-export type StockLocationKind = "DEPOSITO" | "NEGOZIO" | "AUTISTA";
-
 export type StockRow = {
   locationKind: StockLocationKind;
-  locationId: string; // depId/shopId/driverId (o dep_default)
-  palletType: string; // EUR/EPAL, CHEP, IFCO ecc.
+  locationId: string;
+  palletType: string;
   qty: number;
 };
 
@@ -73,15 +84,13 @@ export type StockMove = {
   ts: number;
   palletType: string;
   qty: number;
-
   from: { kind: StockLocationKind; id: string };
   to: { kind: StockLocationKind; id: string };
-
   note?: string;
 };
 
 /* ============================
-   LOCAL STORAGE KEYS
+   KEYS
 ============================ */
 
 const KEY_HISTORY = "pt_history_v1";
@@ -134,7 +143,7 @@ export function downloadCsv(filename: string, headers: string[], rows: any[][]) 
 }
 
 /* ============================
-   HISTORY (SCANS)
+   HISTORY
 ============================ */
 
 export function getHistory(): ScanEvent[] {
@@ -162,7 +171,7 @@ export function getLastScan(): string {
 }
 
 /* ============================
-   PALLETS REGISTRY
+   PALLETS
 ============================ */
 
 export function getPallets(): PalletItem[] {
@@ -172,6 +181,15 @@ export function getPallets(): PalletItem[] {
 
 export function setPallets(items: PalletItem[]) {
   localStorage.setItem(KEY_PALLETS, JSON.stringify(items));
+}
+
+export function findPalletByCode(code: string): PalletItem | null {
+  const c = (code || "").trim().toLowerCase();
+  if (!c) return null;
+  const items = getPallets();
+  return (
+    items.find((p) => p.code.toLowerCase() === c || (p.altCode || "").toLowerCase() === c) || null
+  );
 }
 
 export function upsertPallet(update: Partial<PalletItem> & { code: string }) {
@@ -198,6 +216,8 @@ export function upsertPallet(update: Partial<PalletItem> & { code: string }) {
       lastLat: update.lastLat,
       lastLng: update.lastLng,
       lastSource: update.lastSource,
+      lastLocKind: update.lastLocKind,
+      lastLocId: update.lastLocId,
     });
   }
 
@@ -205,7 +225,7 @@ export function upsertPallet(update: Partial<PalletItem> & { code: string }) {
 }
 
 /* ============================
-   DRIVERS (AUTISTI) max 10
+   DRIVERS max 10
 ============================ */
 
 export function getDrivers(): DriverItem[] {
@@ -221,12 +241,7 @@ export function addDriver(data: Omit<DriverItem, "id" | "createdAt">) {
   const list = getDrivers();
   if (list.length >= 10) throw new Error("LIMIT_10");
 
-  const item: DriverItem = {
-    id: uid("drv"),
-    createdAt: Date.now(),
-    ...data,
-  };
-
+  const item: DriverItem = { id: uid("drv"), createdAt: Date.now(), ...data };
   list.unshift(item);
   setDrivers(list);
   return item;
@@ -236,7 +251,6 @@ export function updateDriver(id: string, patch: Partial<DriverItem>) {
   const list = getDrivers();
   const idx = list.findIndex((x) => x.id === id);
   if (idx < 0) return;
-
   list[idx] = { ...list[idx], ...patch };
   setDrivers(list);
 }
@@ -246,7 +260,7 @@ export function removeDriver(id: string) {
 }
 
 /* ============================
-   SHOPS (NEGOZI) max 100
+   SHOPS max 100
 ============================ */
 
 export function getShops(): ShopItem[] {
@@ -262,12 +276,7 @@ export function addShop(data: Omit<ShopItem, "id" | "createdAt">) {
   const list = getShops();
   if (list.length >= 100) throw new Error("LIMIT_100");
 
-  const item: ShopItem = {
-    id: uid("shop"),
-    createdAt: Date.now(),
-    ...data,
-  };
-
+  const item: ShopItem = { id: uid("shop"), createdAt: Date.now(), ...data };
   list.unshift(item);
   setShops(list);
   return item;
@@ -277,7 +286,6 @@ export function updateShop(id: string, patch: Partial<ShopItem>) {
   const list = getShops();
   const idx = list.findIndex((x) => x.id === id);
   if (idx < 0) return;
-
   list[idx] = { ...list[idx], ...patch };
   setShops(list);
 }
@@ -287,17 +295,14 @@ export function removeShop(id: string) {
 }
 
 /* ============================
-   DEPOTS (DEPOSITI)
-   Se non ne hai, esiste sempre dep_default
+   DEPOTS (default always)
 ============================ */
 
 const DEFAULT_DEPOT_ID = "dep_default";
 
 export function getDepots(): DepotItem[] {
   if (typeof window === "undefined") return [];
-  const list = safeParse<DepotItem[]>(localStorage.getItem(KEY_DEPOTS), []);
-  // non salvo il default qui, lo gestisco in UI (sempre disponibile)
-  return list;
+  return safeParse<DepotItem[]>(localStorage.getItem(KEY_DEPOTS), []);
 }
 
 export function setDepots(items: DepotItem[]) {
@@ -305,11 +310,7 @@ export function setDepots(items: DepotItem[]) {
 }
 
 export function getDefaultDepot(): DepotItem {
-  return {
-    id: DEFAULT_DEPOT_ID,
-    name: "Deposito Principale",
-    createdAt: 0,
-  };
+  return { id: DEFAULT_DEPOT_ID, name: "Deposito Principale", createdAt: 0 };
 }
 
 export function getDepotOptions(): DepotItem[] {
@@ -342,25 +343,14 @@ export function setStockMoves(moves: StockMove[]) {
   localStorage.setItem(KEY_STOCK_MOVES, JSON.stringify(moves));
 }
 
-export function getStockQty(kind: StockLocationKind, id: string, palletType: string): number {
-  const rows = getStockRows();
-  const k = stockKey(kind, id, palletType);
-  const row = rows.find((r) => stockKey(r.locationKind, r.locationId, r.palletType) === k);
-  return row?.qty ?? 0;
-}
-
 export function applyStockDelta(kind: StockLocationKind, id: string, palletType: string, delta: number) {
   const rows = getStockRows();
   const k = stockKey(kind, id, palletType);
 
   const idx = rows.findIndex((r) => stockKey(r.locationKind, r.locationId, r.palletType) === k);
-  if (idx >= 0) {
-    rows[idx] = { ...rows[idx], qty: (rows[idx].qty ?? 0) + delta };
-  } else {
-    rows.push({ locationKind: kind, locationId: id, palletType, qty: delta });
-  }
+  if (idx >= 0) rows[idx] = { ...rows[idx], qty: (rows[idx].qty ?? 0) + delta };
+  else rows.push({ locationKind: kind, locationId: id, palletType, qty: delta });
 
-  // pulizia: se qty è 0 o sotto 0, lascio comunque (così vedi errori operativi)
   setStockRows(rows);
 }
 
@@ -368,13 +358,11 @@ export function addStockMove(input: Omit<StockMove, "id" | "ts"> & { ts?: number
   const ts = input.ts ?? Date.now();
   const m: StockMove = { id: uid("stk"), ts, ...input };
 
-  // Validazioni “anti casino”
   if (!m.palletType?.trim()) throw new Error("PALLET_TYPE_REQUIRED");
   if (!Number.isFinite(m.qty) || m.qty <= 0) throw new Error("QTY_INVALID");
   if (!m.from?.kind || !m.from.id) throw new Error("FROM_INVALID");
   if (!m.to?.kind || !m.to.id) throw new Error("TO_INVALID");
 
-  // Applica delta: tolgo da FROM, aggiungo a TO
   applyStockDelta(m.from.kind, m.from.id, m.palletType, -m.qty);
   applyStockDelta(m.to.kind, m.to.id, m.palletType, +m.qty);
 
@@ -382,4 +370,47 @@ export function addStockMove(input: Omit<StockMove, "id" | "ts"> & { ts?: number
   moves.unshift(m);
   setStockMoves(moves.slice(0, 5000));
   return m;
+}
+
+/* ============================
+   HELPERS: Scan -> Stock
+============================ */
+
+// Se la pedana non ha lastLoc, considero che parta dal Deposito Principale
+export function getLastKnownLocForPallet(code: string): { kind: StockLocationKind; id: string } {
+  const p = findPalletByCode(code);
+  if (p?.lastLocKind && p?.lastLocId) return { kind: p.lastLocKind, id: p.lastLocId };
+  return { kind: "DEPOSITO", id: DEFAULT_DEPOT_ID };
+}
+
+// Aggiorna posizione pedana + crea movimento stock
+export function movePalletViaScan(params: {
+  code: string;
+  palletType: string;
+  qty: number;
+  toKind: StockLocationKind;
+  toId: string;
+  note?: string;
+}) {
+  const from = getLastKnownLocForPallet(params.code);
+  const to = { kind: params.toKind, id: params.toId };
+
+  // movimento stock
+  addStockMove({
+    palletType: params.palletType,
+    qty: params.qty,
+    from,
+    to,
+    note: params.note,
+  });
+
+  // aggiorna pallet lastLoc
+  upsertPallet({
+    code: params.code,
+    type: params.palletType,
+    lastLocKind: params.toKind,
+    lastLocId: params.toId,
+  });
+
+  return { from, to };
 }
