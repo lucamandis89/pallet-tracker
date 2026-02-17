@@ -6,7 +6,7 @@ import {
   addHistory,
   getDefaultDepot,
   getDrivers,
-  getShops,
+  getShopOptions,
   movePalletViaScan,
   setLastScan,
   upsertPallet,
@@ -39,7 +39,7 @@ export default function ScanPage() {
   const [note, setNote] = useState<string>("");
 
   const drivers = useMemo(() => getDrivers(), []);
-  const shops = useMemo(() => getShops(), []);
+  const shops = useMemo(() => getShopOptions(), []);
   const depot = getDefaultDepot();
 
   const config = useMemo(
@@ -54,7 +54,8 @@ export default function ScanPage() {
 
   async function getGps(): Promise<{ lat?: number; lng?: number; accuracy?: number }> {
     return new Promise((resolve) => {
-      if (typeof navigator === "undefined" || !navigator.geolocation) return resolve({});
+      if (typeof navigator === "l
+      ode || !navigator.geolocation) return resolve({});
       navigator.geolocation.getCurrentPosition(
         (pos) =>
           resolve({
@@ -405,16 +406,15 @@ export default function ScanPage() {
             <div>
               <div style={{ fontWeight: 900, marginBottom: 6 }}>Seleziona</div>
               <select value={toId} onChange={(e) => setToId(e.target.value)} style={input as any}>
-                {optionsFor(toKind).length === 0 ? (
-                  <option value="">(Nessuna voce)</option>
-                ) : (
-                  optionsFor(toKind).map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))
-                )}
+                {optionsFor(toKind).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 6 }}>
+                ✅ Se non hai ancora creato negozi, usa “Negozio Principale” (default).
+              </div>
             </div>
 
             <div style={{ gridColumn: "1 / -1" }}>
