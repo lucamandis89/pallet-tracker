@@ -1,61 +1,128 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { formatDT, getPallets } from "../lib/storage";
+import { addMissing, getMissing, removeMissing, resolveMissing, type MissingItem } from "../lib/storage";
 
 export default function MissingPage() {
-  const [days, setDays] = useState(7);
-  const [refresh, setRefresh] = useState(0);
+  const [list, setList] = useState<MissingItem[]>(() => getMissing());
+  const [code, setCode] = useState("");
+  const [reason, setReason] = useState("");
 
-  const list = useMemo(() => {
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    return getPallets()
-      .filter((p) => (p.lastSeenTs ?? 0) < cutoff)
-      .sort((a, b) => (a.lastSeenTs ?? 0) - (b.lastSeenTs ?? 0));
-  }, [days, refresh]);
+  const styles = useMemo(() => {
+    const input = {
+      width: "100%",
+      padding: 12,
+      borderRadius: 12,
+      border: "1px solid #ddd",
+      fontSize: 16,
+      outline: "none",
+    } as const;
+
+    const btn = (bg: string) =>
+      ({
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: "none",
+        fontWeight: 900,
+        cursor: "pointer",
+        background: bg,
+        color: "white",
+      } as const);
+
+    return { input, btn };
+  }, []);
+
+  function reload() {
+    setList(getMissing());
+  }
+
+  function add() {
+    const c = code.trim();
+    if (!c) return alert("Inserisci il codice pedana mancante.");
+    addMissing({
+      palletCode: c,
+      reason: reason.trim() || undefined,
+    });
+    setCode("");
+    setReason("");
+    reload();
+  }
+
+  function toggle(m: MissingItem) {
+    resolveMissing(m.id, !(m.resolved === true));
+    reload();
+  }
+
+  function del(id: string) {
+    if (!confirm("Eliminare dalla lista mancanti?")) return;
+    removeMissing(id);
+    reload();
+  }
+
+  const open = list.filter((x) => !x.resolved);
+  const closed = list.filter((x) => x.resolved);
 
   return (
-    <div style={{ padding: 16, maxWidth: 1050, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>🚨 Pedane Mancanti</h1>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <a href="/" style={link()}>← Home</a>
-        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
-        <div style={{ fontWeight: 900 }}>Soglia giorni:</div>
-        <input
-          type="number"
-          min={1}
-          value={days}
-          onChange={(e) => setDays(Math.max(1, parseInt(e.target.value || "7", 10)))}
-          style={input()}
-        />
+    <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
+      <h1 style={{ margin: 0, fontSize: 32 }}>🚨 Pedane Mancanti</h1>
+      <div style={{ marginTop: 10 }}>
+        <a href="/" style={{ color: "#1e88e5", fontWeight: 800, textDecoration: "none" }}>
+          ← Home
+        </a>
       </div>
 
-      <div style={box()}>
-        {list.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>Nessuna pedana “mancante” con soglia {days} giorni.</div>
-        ) : null}
-
+      <div style={{ marginTop: 14, padding: 14, borderRadius: 16, border: "1px solid #e6e6e6", background: "white" }}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Segnala pedana mancante</div>
         <div style={{ display: "grid", gap: 10 }}>
-          {list.map((p) => (
-            <div key={p.id} style={card()}>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>{p.code}</div>
-              <div style={{ opacity: 0.85 }}>
-                Ultimo visto: {p.lastSeenTs ? formatDT(p.lastSeenTs) : "—"} • Tipo: {p.palletType || "—"}
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Codice pedana (es. PEDANA-000123)" style={styles.input} />
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Motivo (opz.)" style={styles.input} />
+          <button onClick={add} style={styles.btn("#e53935")}>+ Aggiungi mancante</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        <div style={{ fontWeight: 1000, fontSize: 18 }}>Aperte: {open.length}</div>
+
+        {open.map((m) => (
+          <div key={m.id} style={{ padding: 14, borderRadius: 16, border: "1px solid #e6e6e6", background: "white" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 1000, fontSize: 18 }}>{m.palletCode}</div>
+                <div style={{ opacity: 0.85 }}>{m.reason || "—"}</div>
+                <div style={{ opacity: 0.7, fontSize: 13, marginTop: 4 }}>
+                  Inserita: {new Date(m.createdAt).toLocaleString()}
+                </div>
               </div>
-              <div style={{ opacity: 0.85 }}>
-                Ultima posizione: {p.locationKind || "—"} {p.locationId ? `(${p.locationId})` : ""}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 150 }}>
+                <button onClick={() => toggle(m)} style={styles.btn("#2e7d32")}>Segna risolta</button>
+                <button onClick={() => del(m.id)} style={styles.btn("#616161")}>Elimina</button>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
+
+        <div style={{ fontWeight: 1000, fontSize: 18, marginTop: 8 }}>Risolte: {closed.length}</div>
+
+        {closed.map((m) => (
+          <div key={m.id} style={{ padding: 14, borderRadius: 16, border: "1px solid #f0f0f0", background: "#fafafa" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 1000, fontSize: 18 }}>{m.palletCode} ✅</div>
+                <div style={{ opacity: 0.85 }}>{m.reason || "—"}</div>
+                <div style={{ opacity: 0.7, fontSize: 13, marginTop: 4 }}>
+                  Risolta: {m.resolvedAt ? new Date(m.resolvedAt).toLocaleString() : "—"}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 150 }}>
+                <button onClick={() => toggle(m)} style={styles.btn("#0b1220")}>Riapri</button>
+                <button onClick={() => del(m.id)} style={styles.btn("#616161")}>Elimina</button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
-
-const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fafafa" });
-const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
-const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
-const input = (): React.CSSProperties => ({ padding: 10, borderRadius: 12, border: "1px solid #ddd", width: 120 });
