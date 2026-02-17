@@ -1,11 +1,12 @@
 // app/lib/storage.ts
-// Client-only storage helpers (localStorage)
-// Mantiene: Negozi, Depositi, Autisti, Pedane, Stock, Scansioni, Storico, Mancanti
-// NOTE: in SSR window/localStorage non esistono -> tutte le funzioni sono "safe".
+// Client-only storage helpers (localStorage) — SSR safe
+// Include EXPORTS + ALIAS per non rompere le pagine che importano nomi diversi.
 
 export type IdName = { id: string; name: string };
 
 export type StockLocationKind = "shop" | "depot";
+
+export type PalletType = "EUR/EPAL" | "CHEP" | "LPR" | "IFCO" | "CP" | "ALTRO";
 
 export type DriverItem = {
   id: string;
@@ -36,11 +37,14 @@ export type ShopItem = {
 
 export type PalletItem = {
   id: string; // palletId (codice)
+  type?: PalletType;
+
   status?: "IN_STOCK" | "IN_TRANSIT" | "DELIVERED" | "MISSING";
   locationKind?: StockLocationKind;
   locationId?: string; // shopId/depotId
   driverId?: string;
   note?: string;
+
   updatedAt: number;
   createdAt: number;
 };
@@ -59,7 +63,6 @@ export type HistoryItem = {
     | "STOCK";
   note?: string;
 
-  // opzionali (se li usi in UI)
   locationKind?: StockLocationKind;
   locationId?: string;
   driverId?: string;
@@ -67,19 +70,23 @@ export type HistoryItem = {
   ts: number;
 };
 
-export type ScanHistoryItem = {
+// Alcune pagine chiamano questo tipo ScanHistoryItem:
+export type ScanHistoryItem = HistoryItem;
+
+export type QrScanItem = {
   id: string;
-  payload: string; // testo QR letto
+  payload: string;
   ts: number;
 };
 
+// Alcune pagine chiamano questo tipo MissingItem:
 export type MissingItem = {
   id: string;
   palletId: string;
   note?: string;
   createdAt: number;
-  resolvedAt?: number;
   resolved?: boolean;
+  resolvedAt?: number;
 };
 
 // -------------------------
@@ -91,7 +98,7 @@ const KEYS = {
   drivers: "pt_drivers_v1",
   pallets: "pt_pallets_v1",
   history: "pt_history_v1",
-  scanHistory: "pt_scan_history_v1",
+  qrScans: "pt_qr_scans_v1",
   lastScan: "pt_last_scan_v1",
   missing: "pt_missing_v1",
 };
@@ -170,18 +177,12 @@ export function clearHistory() {
   save(KEYS.history, [] as HistoryItem[]);
 }
 
-// Scarica CSV dello storico (se non passi nulla, usa getHistory())
-export function downloadCsv(items?: HistoryItem[], filename = "history.csv") {
-  if (!hasStorage()) return;
-
-  const rows = (items ?? getHistory()).slice().reverse(); // cronologico
+// CSV helper: alcune pagine importano historyToCsv
+function buildHistoryCsv(items: HistoryItem[]) {
   const header = ["ts", "palletId", "action", "note", "locationKind", "locationId", "driverId"];
+  const esc = (v: unknown) => `"${(v ?? "").toString().replaceAll('"', '""')}"`;
 
-  const esc = (v: unknown) => {
-    const s = (v ?? "").toString().replaceAll('"', '""');
-    return `"${s}"`;
-  };
-
+  const rows = items.slice().reverse(); // cronologico
   const lines = [
     header.join(","),
     ...rows.map((r) =>
@@ -196,8 +197,15 @@ export function downloadCsv(items?: HistoryItem[], filename = "history.csv") {
       ].join(",")
     ),
   ];
+  return lines.join("\n");
+}
 
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+// ✅ downloadCsv (come prima)
+export function downloadCsv(items?: HistoryItem[], filename = "history.csv") {
+  if (!hasStorage()) return;
+  const csv = buildHistoryCsv(items ?? getHistory());
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
@@ -208,6 +216,13 @@ export function downloadCsv(items?: HistoryItem[], filename = "history.csv") {
   a.remove();
 
   setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+
+// ✅ alias richiesto dagli errori: historyToCsv
+// Alcune pagine lo usano per scaricare il CSV: qui lo facciamo scaricare.
+export function historyToCsv(items?: ScanHistoryItem[], filename = "history.csv") {
+  // ScanHistoryItem = HistoryItem
+  downloadCsv(items as unknown as HistoryItem[] | undefined, filename);
 }
 
 // -------------------------
@@ -243,14 +258,16 @@ export function updateShop(id: string, patch: Partial<Omit<ShopItem, "id" | "cre
 }
 
 export function deleteShop(id: string) {
-  const list = getShops().filter((x) => x.id !== id);
-  save(KEYS.shops, list);
+  save(KEYS.shops, getShops().filter((x) => x.id !== id));
 }
 
 // alias (se in qualche pagina importi removeShop)
 export const removeShop = deleteShop;
 
-// se ti serve un default shop:
+export function getShopOptions(): { id: string; label: string }[] {
+  return getShops().map((s) => ({ id: s.id, label: s.name }));
+}
+
 export function getDefaultShop(): ShopItem | null {
   const list = getShops();
   return list.length ? list[0] : null;
@@ -289,8 +306,16 @@ export function updateDepot(id: string, patch: Partial<Omit<DepotItem, "id" | "c
 }
 
 export function deleteDepot(id: string) {
-  const list = getDepots().filter((x) => x.id !== id);
-  save(KEYS.depots, list);
+  save(KEYS.depots, getDepots().filter((x) => x.id !== id));
+}
+
+export function getDepotOptions(): { id: string; label: string }[] {
+  return getDepots().map((d) => ({ id: d.id, label: d.name }));
+}
+
+export function getDefaultDepot(): DepotItem | null {
+  const list = getDepots();
+  return list.length ? list[0] : null;
 }
 
 // -------------------------
@@ -326,8 +351,7 @@ export function updateDriver(id: string, patch: Partial<Omit<DriverItem, "id" | 
 }
 
 export function deleteDriver(id: string) {
-  const list = getDrivers().filter((x) => x.id !== id);
-  save(KEYS.drivers, list);
+  save(KEYS.drivers, getDrivers().filter((x) => x.id !== id));
 }
 
 // -------------------------
@@ -362,8 +386,43 @@ export function upsertPallet(palletId: string, patch: Partial<Omit<PalletItem, "
 
 export function removePallet(palletId: string) {
   const id = (palletId || "").trim();
-  const list = getPallets().filter((p) => p.id !== id);
-  save(KEYS.pallets, list);
+  save(KEYS.pallets, getPallets().filter((p) => p.id !== id));
+}
+
+// ✅ alias richiesto dagli errori: deletePallet
+export const deletePallet = removePallet;
+
+// Funzione usata dalla scan page
+export function movePalletViaScan(args: {
+  palletId: string;
+  locationKind?: StockLocationKind;
+  locationId?: string;
+  driverId?: string;
+  note?: string;
+  type?: PalletType;
+}) {
+  const pid = (args.palletId || "").trim();
+  if (!pid) return null;
+
+  const updated = upsertPallet(pid, {
+    type: args.type,
+    status: "IN_STOCK",
+    locationKind: args.locationKind,
+    locationId: args.locationId,
+    driverId: args.driverId,
+    note: args.note,
+  });
+
+  addHistory({
+    palletId: pid,
+    action: "MOVE",
+    note: args.note,
+    locationKind: args.locationKind,
+    locationId: args.locationId,
+    driverId: args.driverId,
+  });
+
+  return updated;
 }
 
 // -------------------------
@@ -377,21 +436,21 @@ export function getLastScan(): string {
   return load<string>(KEYS.lastScan, "");
 }
 
-export function getScanHistory(): ScanHistoryItem[] {
-  return load<ScanHistoryItem[]>(KEYS.scanHistory, []);
+// Se la tua UI usa una lista scansioni QR:
+export function getQrScans(): QrScanItem[] {
+  return load<QrScanItem[]>(KEYS.qrScans, []);
 }
 
-export function addScanHistory(payload: string) {
-  const p = (payload || "").toString();
-  const list = getScanHistory();
-  const item: ScanHistoryItem = { id: uid("scan"), payload: p, ts: now() };
+export function addQrScan(payload: string) {
+  const list = getQrScans();
+  const item: QrScanItem = { id: uid("scan"), payload: (payload || "").toString(), ts: now() };
   list.unshift(item);
-  save(KEYS.scanHistory, list);
+  save(KEYS.qrScans, list);
   return item;
 }
 
-export function clearScanHistory() {
-  save(KEYS.scanHistory, [] as ScanHistoryItem[]);
+export function clearQrScans() {
+  save(KEYS.qrScans, [] as QrScanItem[]);
 }
 
 // -------------------------
@@ -405,20 +464,15 @@ export function addMissing(palletId: string, note?: string): MissingItem {
   const pid = (palletId || "").trim();
   const list = getMissing();
 
-  // se esiste già non risolto, aggiorna (no duplicati)
+  // evita duplicati non risolti
   const idx = list.findIndex((m) => m.palletId === pid && !m.resolved);
   if (idx >= 0) {
-    const updated: MissingItem = {
-      ...list[idx],
-      note: note ?? list[idx].note,
-      resolved: false,
-      resolvedAt: undefined,
-    };
-    list[idx] = updated;
+    const upd: MissingItem = { ...list[idx], note: note ?? list[idx].note, resolved: false, resolvedAt: undefined };
+    list[idx] = upd;
     save(KEYS.missing, list);
-
-    if (pid) addHistory({ palletId: pid, action: "MISSING", note: updated.note });
-    return updated;
+    addHistory({ palletId: pid, action: "MISSING", note: upd.note });
+    upsertPallet(pid, { status: "MISSING" });
+    return upd;
   }
 
   const item: MissingItem = {
@@ -432,38 +486,35 @@ export function addMissing(palletId: string, note?: string): MissingItem {
   list.unshift(item);
   save(KEYS.missing, list);
 
-  if (pid) addHistory({ palletId: pid, action: "MISSING", note });
-  // opzionale: marca pedana
-  if (pid) upsertPallet(pid, { status: "MISSING" });
+  addHistory({ palletId: pid, action: "MISSING", note });
+  upsertPallet(pid, { status: "MISSING" });
 
   return item;
 }
 
 export function removeMissing(id: string) {
-  const list = getMissing().filter((m) => m.id !== id);
-  save(KEYS.missing, list);
+  save(KEYS.missing, getMissing().filter((m) => m.id !== id));
 }
 
-// ✅ export che ti mancava in build: resolveMissing
 export function resolveMissing(id: string) {
   const list = getMissing();
   const idx = list.findIndex((m) => m.id === id);
   if (idx < 0) return null;
 
-  const item = list[idx];
-  const resolvedItem: MissingItem = {
-    ...item,
-    resolved: true,
-    resolvedAt: now(),
-  };
-
-  list[idx] = resolvedItem;
+  const it = list[idx];
+  const resolved: MissingItem = { ...it, resolved: true, resolvedAt: now() };
+  list[idx] = resolved;
   save(KEYS.missing, list);
 
-  if (resolvedItem.palletId) {
-    addHistory({ palletId: resolvedItem.palletId, action: "FOUND", note: resolvedItem.note });
-    upsertPallet(resolvedItem.palletId, { status: "IN_STOCK" });
+  if (resolved.palletId) {
+    addHistory({ palletId: resolved.palletId, action: "FOUND", note: resolved.note });
+    upsertPallet(resolved.palletId, { status: "IN_STOCK" });
   }
 
-  return resolvedItem;
+  return resolved;
 }
+
+// Alias extra (se in qualche file hai quei nomi vecchi)
+export const getMissingList = getMissing;
+export const markMissing = addMissing;
+export const unmarkMissing = resolveMissing;
