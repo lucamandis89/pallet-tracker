@@ -1,163 +1,158 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 type HistoryItem = {
   id: string;
-  code: string;
+  pedanaCode: string;
+  ts: string;
   lat?: number;
   lng?: number;
-  date: string;
+  accuracy?: number;
+  driverName?: string;
+  shopName?: string;
+  depotName?: string;
 };
 
+const STORAGE_HISTORY = "pallet_history";
+
+function safeParse<T>(raw: string | null, fallback: T): T {
+  try {
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function toCSV(rows: HistoryItem[]) {
+  const header = [
+    "id",
+    "timestamp",
+    "pedanaCode",
+    "lat",
+    "lng",
+    "accuracy",
+    "driverName",
+    "shopName",
+    "depotName",
+  ];
+
+  const esc = (v: any) => {
+    const s = v === undefined || v === null ? "" : String(v);
+    const needs = /[",\n;]/.test(s);
+    const out = s.replace(/"/g, '""');
+    return needs ? `"${out}"` : out;
+  };
+
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    lines.push(
+      [
+        r.id,
+        r.ts,
+        r.pedanaCode,
+        r.lat ?? "",
+        r.lng ?? "",
+        r.accuracy ?? "",
+        r.driverName ?? "",
+        r.shopName ?? "",
+        r.depotName ?? "",
+      ].map(esc).join(",")
+    );
+  }
+  return lines.join("\n");
+}
+
 export default function HistoryPage() {
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [q, setQ] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem("pallet_history");
-    if (saved) setHistory(JSON.parse(saved));
+    const saved = safeParse<HistoryItem[]>(localStorage.getItem(STORAGE_HISTORY), []);
+    setItems(saved);
   }, []);
 
-  function clearHistory() {
-    localStorage.removeItem("pallet_history");
-    setHistory([]);
+  function refresh() {
+    const saved = safeParse<HistoryItem[]>(localStorage.getItem(STORAGE_HISTORY), []);
+    setItems(saved);
   }
 
-  function downloadFile(filename: string, content: string, mime: string) {
-    const blob = new Blob([content], { type: mime });
+  function clearAll() {
+    if (!confirm("Vuoi svuotare TUTTO lo storico?")) return;
+    localStorage.removeItem(STORAGE_HISTORY);
+    setItems([]);
+  }
+
+  function exportCSV() {
+    const csv = toCSV(items);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
+    a.download = `pallet_history_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
-    a.remove();
     URL.revokeObjectURL(url);
   }
 
-  function escapeCsv(value: any, sep: string) {
-    const s = String(value ?? "");
-    // se contiene separatore, virgolette o newline → racchiudi tra ""
-    if (s.includes(sep) || s.includes('"') || s.includes("\n") || s.includes("\r")) {
-      return `"${s.replaceAll('"', '""')}"`;
-    }
-    return s;
-  }
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter((x) => {
+      const hay = `${x.pedanaCode} ${x.ts} ${x.driverName ?? ""} ${x.shopName ?? ""} ${x.depotName ?? ""} ${x.lat ?? ""} ${x.lng ?? ""}`.toLowerCase();
+      return hay.includes(s);
+    });
+  }, [items, q]);
 
-  function exportCsv(sep: "," | ";") {
-    const headers = ["id", "code", "date", "lat", "lng"];
-    const rows = history.map((h) => [
-      escapeCsv(h.id, sep),
-      escapeCsv(h.code, sep),
-      escapeCsv(h.date, sep),
-      escapeCsv(h.lat ?? "", sep),
-      escapeCsv(h.lng ?? "", sep),
-    ]);
-
-    // BOM UTF-8 per Excel (apre meglio gli accenti)
-    const bom = "\uFEFF";
-    const csv = bom + [headers.join(sep), ...rows.map((r) => r.join(sep))].join("\n");
-
-    const ts = new Date().toISOString().slice(0, 19).replaceAll(":", "-");
-    downloadFile(`storico-pedane_${ts}.csv`, csv, "text/csv;charset=utf-8");
-  }
+  const inputStyle = { padding: 12, borderRadius: 12, border: "1px solid #ddd", width: "100%", fontSize: 16 };
+  const btn = (bg: string) => ({ padding: "12px 14px", borderRadius: 12, border: "none", fontWeight: 900 as const, cursor: "pointer", background: bg, color: "white" });
 
   return (
-    <div style={{ padding: 16, maxWidth: 720, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 10 }}>📌 Storico Pedane</h1>
+    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 28, marginBottom: 6 }}>📄 Storico Scansioni</h1>
+      <div style={{ opacity: 0.85, marginBottom: 14 }}>
+        Totale record: <b>{items.length}</b>
+      </div>
 
-      {history.length === 0 ? (
-        <p style={{ fontSize: 16, opacity: 0.8 }}>Nessuna scansione salvata.</p>
-      ) : (
-        <>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-            <div style={{ fontWeight: 900, paddingTop: 10 }}>Totale scansioni: {history.length}</div>
-
-            <button
-              onClick={() => exportCsv(",")}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "none",
-                background: "#1e88e5",
-                color: "white",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              ⬇️ Export CSV (,)
-            </button>
-
-            <button
-              onClick={() => exportCsv(";")}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "none",
-                background: "#0b1220",
-                color: "white",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              ⬇️ Export CSV (; Excel)
-            </button>
-
-            <button
-              onClick={clearHistory}
-              style={{
-                padding: "10px 14px",
-                borderRadius: 10,
-                border: "none",
-                background: "#e53935",
-                color: "white",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              🗑️ Cancella tutto
-            </button>
-          </div>
-
-          {history.map((item) => (
-            <div
-              key={item.id}
-              style={{
-                padding: 14,
-                borderRadius: 14,
-                border: "1px solid #ddd",
-                marginBottom: 12,
-                background: "#f9f9f9",
-              }}
-            >
-              <div style={{ fontWeight: 900, fontSize: 18 }}>📦 {item.code}</div>
-              <div style={{ marginTop: 6, fontSize: 14 }}>🕒 {item.date}</div>
-
-              {typeof item.lat === "number" && typeof item.lng === "number" ? (
-                <div style={{ marginTop: 6, fontSize: 14 }}>
-                  📍 GPS: {item.lat}, {item.lng}
-                  <br />
-                  <a
-                    href={`https://www.google.com/maps?q=${item.lat},${item.lng}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ fontWeight: 900 }}
-                  >
-                    Apri su Google Maps
-                  </a>
-                </div>
-              ) : (
-                <div style={{ marginTop: 6, fontSize: 14, opacity: 0.8 }}>GPS non disponibile</div>
-              )}
-            </div>
-          ))}
-        </>
-      )}
-
-      <div style={{ marginTop: 18 }}>
-        <a href="/" style={{ fontWeight: 900, textDecoration: "none" }}>
-          ← Torna alla Home
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button style={btn("#6a1b9a")} onClick={exportCSV} disabled={items.length === 0}>
+          ⬇️ Export CSV
+        </button>
+        <button style={btn("#9e9e9e")} onClick={refresh}>
+          🔄 Aggiorna
+        </button>
+        <button style={btn("#e53935")} onClick={clearAll} disabled={items.length === 0}>
+          🗑️ Svuota
+        </button>
+        <a href="/scan" style={{ ...btn("#1565c0"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          ← Torna a Scan
         </a>
+        <a href="/" style={{ ...btn("#0b1220"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          ← Home
+        </a>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <input style={inputStyle} value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎 Cerca (codice, data, autista, negozio, deposito, lat/lng)" />
+      </div>
+
+      <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+        {filtered.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Nessun record nello storico.</div>
+        ) : (
+          filtered.map((x) => (
+            <div key={x.id} style={{ border: "1px solid #eee", borderRadius: 16, padding: 14, background: "white" }}>
+              <div style={{ fontWeight: 900, fontSize: 18 }}>{x.pedanaCode}</div>
+              <div style={{ marginTop: 6, opacity: 0.8 }}>🕒 {x.ts}</div>
+
+              <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+                {x.driverName ? <>🚚 Autista: <b>{x.driverName}</b><br /></> : null}
+                {x.shopName ? <>🏪 Negozio: <b>{x.shopName}</b><br /></> : null}
+                {x.depotName ? <>🏭 Deposito: <b>{x.depotName}</b><br /></> : null}
+                📍 GPS: {x.lat ?? "-"}, {x.lng ?? "-"} {x.accuracy ? `(±${Math.round(x.accuracy)}m)` : ""}
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
