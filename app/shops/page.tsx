@@ -1,75 +1,229 @@
-// app/shops/page.tsx
 "use client";
 
-import React, { useState } from "react";
-import { addShop, getShops, removeShop, updateShop, ShopItem } from "../lib/storage";
+import React, { useMemo, useState } from "react";
+import {
+  addShop,
+  getDefaultShop,
+  getShops,
+  removeShop,
+  setDefaultShop,
+  updateShop,
+  type ShopItem,
+} from "../lib/storage";
 
 export default function ShopsPage() {
-  const [refresh, setRefresh] = useState(0);
+  const [list, setList] = useState<ShopItem[]>(() => getShops());
+  const [def, setDef] = useState<string>(() => getDefaultShop());
+
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [note, setNote] = useState("");
+  const [lat, setLat] = useState<string>("");
+  const [lng, setLng] = useState<string>("");
 
-  const list = getShops();
+  const styles = useMemo(() => {
+    const input = {
+      width: "100%",
+      padding: 12,
+      borderRadius: 12,
+      border: "1px solid #ddd",
+      fontSize: 16,
+      outline: "none",
+    } as const;
+
+    const btn = (bg: string) =>
+      ({
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: "none",
+        fontWeight: 900,
+        cursor: "pointer",
+        background: bg,
+        color: "white",
+      } as const);
+
+    return { input, btn };
+  }, []);
+
+  function reload() {
+    setList(getShops());
+    setDef(getDefaultShop());
+  }
+
+  async function captureGps() {
+    if (!navigator.geolocation) {
+      alert("Geolocalizzazione non supportata.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLat(String(pos.coords.latitude));
+        setLng(String(pos.coords.longitude));
+      },
+      () => alert("Permesso GPS negato o posizione non disponibile."),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
 
   function add() {
-    addShop(name, address);
+    if (!name.trim()) return alert("Inserisci il nome negozio.");
+    addShop({
+      name: name.trim(),
+      address: address.trim() || undefined,
+      city: city.trim() || undefined,
+      note: note.trim() || undefined,
+      lat: lat ? Number(lat) : undefined,
+      lng: lng ? Number(lng) : undefined,
+    });
     setName("");
     setAddress("");
-    setRefresh((x) => x + 1);
+    setCity("");
+    setNote("");
+    setLat("");
+    setLng("");
+    reload();
   }
 
   function edit(s: ShopItem) {
-    const n = prompt("Nome negozio", s.name) ?? s.name;
-    const a = prompt("Indirizzo (opz.)", s.address ?? "") ?? (s.address ?? "");
-    updateShop({ ...s, name: n.trim() || s.name, address: a.trim() || "" });
-    setRefresh((x) => x + 1);
+    const newName = prompt("Nome negozio:", s.name) ?? s.name;
+    const newAddress = prompt("Indirizzo:", s.address ?? "") ?? (s.address ?? "");
+    const newCity = prompt("Città:", s.city ?? "") ?? (s.city ?? "");
+    const newNote = prompt("Note:", s.note ?? "") ?? (s.note ?? "");
+    updateShop(s.id, {
+      name: newName.trim() || s.name,
+      address: newAddress.trim() || undefined,
+      city: newCity.trim() || undefined,
+      note: newNote.trim() || undefined,
+    });
+    reload();
   }
 
   function del(id: string) {
-    if (!confirm("Eliminare questo negozio?")) return;
+    if (!confirm("Eliminare negozio?")) return;
     removeShop(id);
-    setRefresh((x) => x + 1);
+    reload();
+  }
+
+  function setDefault(id: string) {
+    setDefaultShop(id);
+    reload();
   }
 
   return (
     <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>🏪 Gestione Negozi</h1>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <a href="/" style={link()}>← Home</a>
-        <a href="/scan" style={link()}>Scanner</a>
+      <h1 style={{ margin: 0, fontSize: 32 }}>🏪 Gestione Negozi</h1>
+      <div style={{ marginTop: 10 }}>
+        <a href="/" style={{ color: "#1e88e5", fontWeight: 800, textDecoration: "none" }}>
+          ← Home
+        </a>
       </div>
 
-      <div style={box()}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Aggiungi negozio</div>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" style={inp()} />
-        <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Indirizzo (opz.)" style={inp()} />
-        <button onClick={add} style={btn("#2e7d32")}>Aggiungi</button>
-      </div>
+      <div
+        style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 16,
+          border: "1px solid #e6e6e6",
+          background: "white",
+        }}
+      >
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Aggiungi negozio</div>
 
-      <div style={box()}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>Elenco</div>
-        {list.length === 0 ? <div style={{ opacity: 0.7 }}>Nessun negozio.</div> : null}
         <div style={{ display: "grid", gap: 10 }}>
-          {list.map((s) => (
-            <div key={s.id} style={card()}>
-              <div style={{ fontWeight: 900 }}>{s.name}</div>
-              {s.address ? <div style={{ opacity: 0.8 }}>{s.address}</div> : null}
-              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                <button onClick={() => edit(s)} style={btn("#455a64")}>Modifica</button>
-                <button onClick={() => del(s.id)} style={btn("#e53935")}>Elimina</button>
-              </div>
-            </div>
-          ))}
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Nome negozio"
+            style={styles.input}
+          />
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Indirizzo (opz.)"
+            style={styles.input}
+          />
+          <input
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            placeholder="Città (opz.)"
+            style={styles.input}
+          />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note (opz.)"
+            style={styles.input}
+          />
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <input
+              value={lat}
+              onChange={(e) => setLat(e.target.value)}
+              placeholder="Latitudine (opz.)"
+              style={{ ...styles.input, flex: "1 1 180px" }}
+            />
+            <input
+              value={lng}
+              onChange={(e) => setLng(e.target.value)}
+              placeholder="Longitudine (opz.)"
+              style={{ ...styles.input, flex: "1 1 180px" }}
+            />
+            <button onClick={captureGps} style={styles.btn("#6a1b9a")}>
+              📍 Prendi GPS
+            </button>
+          </div>
+
+          <button onClick={add} style={styles.btn("#1b9a4a")}>
+            + Aggiungi negozio
+          </button>
         </div>
       </div>
-      <div style={{ opacity: 0, height: 1 }}>{refresh}</div>
+
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        {list.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Nessun negozio inserito.</div>
+        ) : (
+          list.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                padding: 14,
+                borderRadius: 16,
+                border: "1px solid #e6e6e6",
+                background: "white",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>
+                    {s.name} {def === s.id ? "⭐" : ""}
+                  </div>
+                  <div style={{ opacity: 0.8 }}>
+                    {s.address || "—"} {s.city ? `· ${s.city}` : ""}
+                  </div>
+                  <div style={{ opacity: 0.7, fontSize: 13 }}>
+                    GPS: {s.lat ?? "—"} / {s.lng ?? "—"}
+                  </div>
+                  {s.note ? <div style={{ marginTop: 6 }}>{s.note}</div> : null}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 130 }}>
+                  <button onClick={() => edit(s)} style={styles.btn("#1e88e5")}>
+                    Modifica
+                  </button>
+                  <button onClick={() => setDefault(s.id)} style={styles.btn("#0b1220")}>
+                    Default
+                  </button>
+                  <button onClick={() => del(s.id)} style={styles.btn("#e53935")}>
+                    Elimina
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
-
-const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 12, borderRadius: 14, border: "1px solid #eee" });
-const inp = (): React.CSSProperties => ({ padding: 12, borderRadius: 12, border: "1px solid #ddd", width: "100%", marginBottom: 10, fontWeight: 800 });
-const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
-const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
