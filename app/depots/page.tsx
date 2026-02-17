@@ -1,70 +1,75 @@
+// app/depots/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { addDepot, getDepots, removeDepot, updateDepot } from "../lib/storage";
+import React, { useState } from "react";
+import { addDepot, getDepots, removeDepot, updateDepot, DepotItem } from "../lib/storage";
 
 export default function DepotsPage() {
   const [refresh, setRefresh] = useState(0);
-  const list = useMemo(() => getDepots(), [refresh]);
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+
+  const list = getDepots();
 
   function add() {
-    const name = prompt("Nome deposito:");
-    if (!name?.trim()) return;
-    const address = prompt("Indirizzo (opz.)") || "";
-    const note = prompt("Note (opz.)") || "";
-    addDepot(name.trim(), address.trim() || undefined, note.trim() || undefined);
+    addDepot(name, address);
+    setName("");
+    setAddress("");
     setRefresh((x) => x + 1);
   }
 
-  function edit(id: string) {
-    const d = list.find((x) => x.id === id);
-    if (!d) return;
-    const name = prompt("Nome:", d.name) ?? d.name;
-    const address = prompt("Indirizzo:", d.address || "") ?? (d.address || "");
-    const note = prompt("Note:", d.note || "") ?? (d.note || "");
-    updateDepot(id, { name: name.trim(), address: address.trim() || undefined, note: note.trim() || undefined });
+  function edit(d: DepotItem) {
+    const n = prompt("Nome deposito", d.name) ?? d.name;
+    const a = prompt("Indirizzo (opz.)", d.address ?? "") ?? (d.address ?? "");
+    updateDepot({ ...d, name: n.trim() || d.name, address: a.trim() || "" });
     setRefresh((x) => x + 1);
   }
 
   function del(id: string) {
-    if (!confirm("Eliminare deposito? (se è l’ultimo non si può)")) return;
+    if (!confirm("Eliminare questo deposito?")) return;
     removeDepot(id);
     setRefresh((x) => x + 1);
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
+    <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>🏭 Depositi</h1>
+
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <a href="/" style={link()}>← Home</a>
-        <button style={btn("#fb8c00")} onClick={add}>+ Aggiungi deposito</button>
-        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
+        <a href="/scan" style={link()}>Scanner</a>
       </div>
 
       <div style={box()}>
-        <div style={{ opacity: 0.8, marginBottom: 10 }}>
-          Nota: non puoi eliminare l’ultimo deposito (serve come fallback).
-        </div>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Aggiungi deposito</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" style={inp()} />
+        <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Indirizzo (opz.)" style={inp()} />
+        <button onClick={add} style={btn("#2e7d32")}>Aggiungi</button>
+      </div>
+
+      <div style={box()}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Elenco</div>
+        {list.length === 0 ? <div style={{ opacity: 0.7 }}>Nessun deposito.</div> : null}
         <div style={{ display: "grid", gap: 10 }}>
           {list.map((d) => (
             <div key={d.id} style={card()}>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>{d.name}</div>
-              <div style={{ opacity: 0.85 }}>
-                {d.address ? `📍 ${d.address}` : "📍 (nessun indirizzo)"} {d.note ? ` • 📝 ${d.note}` : ""}
-              </div>
+              <div style={{ fontWeight: 900 }}>{d.name}</div>
+              {d.address ? <div style={{ opacity: 0.8 }}>{d.address}</div> : null}
               <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                <button style={btn("#455a64")} onClick={() => edit(d.id)}>Modifica</button>
-                <button style={btn("#e53935")} onClick={() => del(d.id)}>Elimina</button>
+                <button onClick={() => edit(d)} style={btn("#455a64")}>Modifica</button>
+                <button onClick={() => del(d.id)} style={btn("#e53935")}>Elimina</button>
               </div>
             </div>
           ))}
         </div>
       </div>
+      <div style={{ opacity: 0, height: 1 }}>{refresh}</div>
     </div>
   );
 }
 
 const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fafafa" });
+const card = (): React.CSSProperties => ({ padding: 12, borderRadius: 14, border: "1px solid #eee" });
+const inp = (): React.CSSProperties => ({ padding: 12, borderRadius: 12, border: "1px solid #ddd", width: "100%", marginBottom: 10, fontWeight: 800 });
 const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
 const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
