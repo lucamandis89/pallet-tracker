@@ -1,62 +1,104 @@
-// app/history/page.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { clearHistory, downloadCsv, formatDT, getHistory } from "../lib/storage";
+import { clearHistory, getHistory, historyToCsv, type ScanHistoryItem } from "../lib/storage";
 
 export default function HistoryPage() {
-  const [refresh, setRefresh] = useState(0);
+  const [list, setList] = useState<ScanHistoryItem[]>(() => getHistory());
 
-  const list = useMemo(() => getHistory(), [refresh]);
+  const grouped = useMemo(() => {
+    // raggruppo per data
+    const map = new Map<string, ScanHistoryItem[]>();
+    for (const h of list) {
+      const d = new Date(h.ts).toLocaleDateString();
+      map.set(d, [...(map.get(d) || []), h]);
+    }
+    return Array.from(map.entries());
+  }, [list]);
 
-  function exportCsv() {
-    downloadCsv(
-      `storico_scansioni_${new Date().toISOString().slice(0, 10)}.csv`,
-      ["datetime", "qr", "lat", "lng", "note"],
-      list.map((x) => [formatDT(x.ts), x.qr, x.lat ?? "", x.lng ?? "", x.note ?? ""])
-    );
+  function reload() {
+    setList(getHistory());
   }
 
-  function clearAll() {
-    if (!confirm("Vuoi cancellare tutto lo storico?")) return;
+  function downloadCsv() {
+    const csv = historyToCsv();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `storico-scan-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function wipe() {
+    if (!confirm("Cancellare tutto lo storico?")) return;
     clearHistory();
-    setRefresh((x) => x + 1);
+    reload();
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>📌 Storico Scansioni</h1>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <a href="/" style={link()}>← Home</a>
-        <a href="/scan" style={link()}>Scanner</a>
-        <button style={btn("#6a1b9a")} onClick={exportCsv}>Export CSV</button>
-        <button style={btn("#e53935")} onClick={clearAll}>Svuota Storico</button>
-        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
+    <div style={{ padding: 16, maxWidth: 980, margin: "0 auto" }}>
+      <h1 style={{ margin: 0, fontSize: 32 }}>📌 Storico Scansioni</h1>
+      <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <a href="/" style={{ color: "#1e88e5", fontWeight: 800, textDecoration: "none" }}>← Home</a>
+        <button onClick={downloadCsv} style={{ padding: "12px 14px", borderRadius: 12, border: "none", fontWeight: 900, cursor: "pointer", background: "#6a1b9a", color: "white" }}>
+          ⬇️ Export CSV
+        </button>
+        <button onClick={wipe} style={{ padding: "12px 14px", borderRadius: 12, border: "none", fontWeight: 900, cursor: "pointer", background: "#e53935", color: "white" }}>
+          🗑️ Svuota storico
+        </button>
       </div>
 
-      <div style={box()}>
-        {list.length === 0 ? <div style={{ opacity: 0.7 }}>Nessuna scansione.</div> : null}
-        <div style={{ display: "grid", gap: 10 }}>
-          {list.slice(0, 200).map((h) => (
-            <div key={h.id} style={card()}>
-              <div style={{ fontWeight: 1000 }}>{h.qr}</div>
-              <div style={{ opacity: 0.85 }}>{formatDT(h.ts)}</div>
-              {typeof h.lat === "number" && typeof h.lng === "number" ? (
-                <div style={{ opacity: 0.85 }}>
-                  GPS: {h.lat.toFixed(6)} , {h.lng.toFixed(6)}
-                </div>
-              ) : null}
-              {h.note ? <div style={{ opacity: 0.85 }}>Note: {h.note}</div> : null}
+      <div style={{ marginTop: 14, opacity: 0.8 }}>
+        Righe storico: <b>{list.length}</b>
+      </div>
+
+      {grouped.length === 0 ? (
+        <div style={{ marginTop: 14, opacity: 0.8 }}>Nessuna scansione salvata.</div>
+      ) : (
+        <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+          {grouped.map(([day, items]) => (
+            <div key={day} style={{ padding: 14, borderRadius: 16, border: "1px solid #e6e6e6", background: "white" }}>
+              <div style={{ fontWeight: 1000, fontSize: 18, marginBottom: 10 }}>{day}</div>
+
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>Ora</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>Codice</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>Tipo</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>Qty</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>Luogo</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>GPS</th>
+                      <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #eee" }}>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((h) => (
+                      <tr key={h.id}>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4" }}>
+                          {new Date(h.ts).toLocaleTimeString()}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4", fontWeight: 900 }}>
+                          {h.palletCode}
+                          <div style={{ fontSize: 12, opacity: 0.7 }}>{h.mode}</div>
+                        </td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4" }}>{h.palletType}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4" }}>{h.qty}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4" }}>{h.locationLabel ?? "—"} ({h.locationKind})</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4" }}>{h.lat ?? "—"} / {h.lng ?? "—"}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #f4f4f4" }}>{h.notes ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }
-
-const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 12, borderRadius: 14, border: "1px solid #eee" });
-const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
-const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
