@@ -1,178 +1,73 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Html5QrcodeScanner } from "html5-qrcode";
 import Link from "next/link";
-import {
-  Html5QrcodeScanner,
-  Html5QrcodeScanType,
-} from "html5-qrcode";
 
-export default function ScanPage() {
-  const [status, setStatus] = useState("📷 Inquadra il QR della pedana");
-  const [result, setResult] = useState<string | null>(null);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+export default function ScannerPage() {
+  const [result, setResult] = useState<string>("");
 
   useEffect(() => {
-    const qrRegionId = "qr-reader";
-
-    // Evita doppio mount in dev / refresh
-    if (scannerRef.current) return;
-
-    setStatus("📷 Avvio fotocamera...");
-
     const scanner = new Html5QrcodeScanner(
-      qrRegionId,
+      "reader",
       {
-        fps: 15,
-        qrbox: { width: 300, height: 300 },
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
         rememberLastUsedCamera: true,
-        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-
-        // ⭐️ Questo è IL boost su Android (usa il detector nativo se disponibile)
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-
-        // Forza camera posteriore
-        videoConstraints: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          // Alcuni device accettano advanced:
-          advanced: [{ focusMode: "continuous" } as any],
-        } as any,
+        supportedScanTypes: [0], // solo camera
       },
       false
     );
 
-    scannerRef.current = scanner;
-
     scanner.render(
-      async (decodedText) => {
+      (decodedText) => {
         setResult(decodedText);
-        setStatus("✅ QR letto: " + decodedText);
-
-        // Ferma e rimuovi UI scanner
-        try {
-          await scanner.clear();
-        } catch {}
+        scanner.clear(); // ferma scanner dopo lettura
       },
-      () => {
-        // ignora errori continui di scan (normale)
+      (error) => {
+        // ignora errori continui, serve solo debug
       }
     );
 
-    setStatus("📷 Inquadra il QR della pedana");
-
     return () => {
-      (async () => {
-        try {
-          await scanner.clear();
-        } catch {}
-      })();
-      scannerRef.current = null;
+      scanner.clear().catch(() => {});
     };
   }, []);
 
-  const reset = async () => {
-    setResult(null);
-    setStatus("🔄 Riavvio...");
-
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.clear();
-      } catch {}
-      scannerRef.current = null;
-    }
-
-    // ricarica pulita
-    window.location.reload();
-  };
-
   return (
-    <div style={{ padding: 20, fontFamily: "Arial, sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h1 style={{ fontSize: 26, fontWeight: "bold" }}>📷 Scanner QR Pedane</h1>
-        <Link href="/" style={{ textDecoration: "none", fontWeight: "bold" }}>← Home</Link>
-      </div>
+    <div style={{ padding: "20px", fontFamily: "Arial" }}>
+      <h1>📷 Scanner QR Pedane</h1>
 
-      <p style={{ marginTop: 10, fontSize: 16 }}>
-        Scansiona il QR della pedana. La posizione GPS verrà salvata automaticamente.
-      </p>
+      <p>Scansiona il QR della pedana. La posizione GPS verrà salvata automaticamente.</p>
 
       <div
+        id="reader"
         style={{
-          marginTop: 15,
-          padding: 12,
-          background: "#f4f4f4",
-          borderRadius: 10,
-          fontSize: 16,
-          fontWeight: "bold",
+          width: "100%",
+          maxWidth: "400px",
+          margin: "20px auto",
+          borderRadius: "15px",
+          overflow: "hidden",
         }}
-      >
-        Stato: {status}
-      </div>
-
-      <div style={{ marginTop: 20 }}>
-        <div
-          id="qr-reader"
-          style={{
-            width: "100%",
-            maxWidth: 420,
-            borderRadius: 12,
-            overflow: "hidden",
-            border: "2px solid #ddd",
-            margin: "0 auto",
-          }}
-        />
-      </div>
+      />
 
       {result && (
         <div
           style={{
-            marginTop: 20,
-            padding: 12,
             background: "#d4edda",
-            borderRadius: 10,
-            fontSize: 16,
-            fontWeight: "bold",
-            color: "#155724",
+            padding: "15px",
+            borderRadius: "10px",
+            marginTop: "20px",
           }}
         >
-          ✅ Pedana scansionata: {result}
+          <h3>✅ QR letto:</h3>
+          <p style={{ fontSize: "18px", fontWeight: "bold" }}>{result}</p>
         </div>
       )}
 
-      <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-        <button
-          onClick={reset}
-          style={{
-            flex: 1,
-            padding: 15,
-            borderRadius: 12,
-            border: "none",
-            background: "#ff3b30",
-            color: "white",
-            fontSize: 18,
-            fontWeight: "bold",
-          }}
-        >
-          🔄 Riavvia
-        </button>
-
-        <Link
-          href="/"
-          style={{
-            flex: 1,
-            textAlign: "center",
-            padding: 15,
-            borderRadius: 12,
-            background: "#007aff",
-            color: "white",
-            fontSize: 18,
-            fontWeight: "bold",
-            textDecoration: "none",
-          }}
-        >
-          🏠 Home
+      <div style={{ marginTop: "20px" }}>
+        <Link href="/" style={{ textDecoration: "none", color: "blue" }}>
+          ⬅ Torna alla Home
         </Link>
       </div>
     </div>
