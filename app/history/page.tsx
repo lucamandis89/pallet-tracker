@@ -23,6 +23,45 @@ export default function HistoryPage() {
     setHistory([]);
   }
 
+  function downloadFile(filename: string, content: string, mime: string) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function escapeCsv(value: any, sep: string) {
+    const s = String(value ?? "");
+    // se contiene separatore, virgolette o newline → racchiudi tra ""
+    if (s.includes(sep) || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+      return `"${s.replaceAll('"', '""')}"`;
+    }
+    return s;
+  }
+
+  function exportCsv(sep: "," | ";") {
+    const headers = ["id", "code", "date", "lat", "lng"];
+    const rows = history.map((h) => [
+      escapeCsv(h.id, sep),
+      escapeCsv(h.code, sep),
+      escapeCsv(h.date, sep),
+      escapeCsv(h.lat ?? "", sep),
+      escapeCsv(h.lng ?? "", sep),
+    ]);
+
+    // BOM UTF-8 per Excel (apre meglio gli accenti)
+    const bom = "\uFEFF";
+    const csv = bom + [headers.join(sep), ...rows.map((r) => r.join(sep))].join("\n");
+
+    const ts = new Date().toISOString().slice(0, 19).replaceAll(":", "-");
+    downloadFile(`storico-pedane_${ts}.csv`, csv, "text/csv;charset=utf-8");
+  }
+
   return (
     <div style={{ padding: 16, maxWidth: 720, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 10 }}>📌 Storico Pedane</h1>
@@ -31,8 +70,38 @@ export default function HistoryPage() {
         <p style={{ fontSize: 16, opacity: 0.8 }}>Nessuna scansione salvata.</p>
       ) : (
         <>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-            <p style={{ fontWeight: 900 }}>Totale scansioni: {history.length}</p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+            <div style={{ fontWeight: 900, paddingTop: 10 }}>Totale scansioni: {history.length}</div>
+
+            <button
+              onClick={() => exportCsv(",")}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "none",
+                background: "#1e88e5",
+                color: "white",
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              ⬇️ Export CSV (,)
+            </button>
+
+            <button
+              onClick={() => exportCsv(";")}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "none",
+                background: "#0b1220",
+                color: "white",
+                fontWeight: 900,
+                cursor: "pointer",
+              }}
+            >
+              ⬇️ Export CSV (; Excel)
+            </button>
 
             <button
               onClick={clearHistory}
@@ -46,7 +115,7 @@ export default function HistoryPage() {
                 cursor: "pointer",
               }}
             >
-              Cancella tutto
+              🗑️ Cancella tutto
             </button>
           </div>
 
@@ -78,9 +147,7 @@ export default function HistoryPage() {
                   </a>
                 </div>
               ) : (
-                <div style={{ marginTop: 6, fontSize: 14, opacity: 0.8 }}>
-                  GPS non disponibile
-                </div>
+                <div style={{ marginTop: 6, fontSize: 14, opacity: 0.8 }}>GPS non disponibile</div>
               )}
             </div>
           ))}
