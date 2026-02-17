@@ -64,13 +64,10 @@ export default function ScanPage() {
         config,
         (decodedText) => {
           setLastResult(decodedText);
-          setStatus(`✅ Letto: ${decodedText}`);
-
-          // qui puoi salvare GPS/storico ecc.
-          // Per test: fermo la scansione appena legge
+          setStatus("✅ QR letto correttamente!");
+          // se vuoi che continui a leggere più volte, COMMENTA la riga sotto
           stop().catch(() => {});
         },
-        // errore continuo: NON spammo lo status, è normale che “fallisca” finché non trova un QR
         () => {}
       );
 
@@ -86,7 +83,7 @@ export default function ScanPage() {
           config,
           (decodedText) => {
             setLastResult(decodedText);
-            setStatus(`✅ Letto: ${decodedText}`);
+            setStatus("✅ QR letto correttamente!");
             stop().catch(() => {});
           },
           () => {}
@@ -109,20 +106,18 @@ export default function ScanPage() {
       await qrRef.current.stop();
       await qrRef.current.clear();
       setIsRunning(false);
-      setStatus("⏸️ Fermato. Premi Avvia per riprendere.");
     } catch (e) {
       console.error(e);
     }
   }
 
-  async function clearResult() {
+  function clearResult() {
     setLastResult("");
     setStatus("📷 Inquadra il QR della pedana");
   }
 
   useEffect(() => {
     loadCameras();
-    // cleanup
     return () => {
       stop().catch(() => {});
     };
@@ -191,6 +186,46 @@ export default function ScanPage() {
             fontWeight: 700,
             cursor: "pointer",
             background: "white",
+            flex: "0 0 auto",
           }}
         >
           Svuota
+        </button>
+      </div>
+
+      {/* CAMERA */}
+      <div
+        id={readerId}
+        style={{
+          width: "100%",
+          borderRadius: 16,
+          overflow: "hidden",
+          border: "1px solid #e5e5e5",
+        }}
+      />
+
+      {/* RISULTATO */}
+      {lastResult ? (
+        <div
+          style={{
+            marginTop: 14,
+            padding: 14,
+            borderRadius: 14,
+            border: "2px solid #2e7d32",
+            background: "#e8f5e9",
+            fontWeight: 800,
+          }}
+        >
+          ✅ QR Rilevato:
+          <div style={{ marginTop: 8, fontSize: 18, fontWeight: 900 }}>{lastResult}</div>
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: 18 }}>
+        <a href="/" style={{ fontWeight: 800, textDecoration: "none" }}>
+          ← Torna alla Home
+        </a>
+      </div>
+    </div>
+  );
+}
