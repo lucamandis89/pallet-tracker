@@ -16,15 +16,15 @@ type HistoryItem = {
   lat?: number;
   lng?: number;
   accuracy?: number;
+  destinationKind: "AUTISTA" | "NEGOZIO" | "DEPOSITO";
+  destinationName: string;
   driverId?: string;
-  driverName?: string;
   shopId?: string;
-  shopName?: string;
   depotId?: string;
-  depotName?: string;
 };
 
 type PalletStatus = "IN_DEPOSITO" | "IN_TRANSITO" | "IN_NEGOZIO";
+
 type Pallet = {
   id: string;
   code: string;
@@ -63,12 +63,12 @@ export default function ScanPage() {
   const [lastResult, setLastResult] = useState<string>("");
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
-  // Anagrafiche
+  // Master data
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
 
-  // Selezioni movimento (scegline UNA sola)
+  // Destination (scegline 1)
   const [selDriverId, setSelDriverId] = useState<string>("");
   const [selShopId, setSelShopId] = useState<string>("");
   const [selDepotId, setSelDepotId] = useState<string>("");
@@ -197,15 +197,24 @@ export default function ScanPage() {
     setSelDepotId("");
   }
 
-  function validateSingleDestination(): { kind: "AUTISTA" | "NEGOZIO" | "DEPOSITO"; id: string } | null {
-    const chosen = [
-      selDriverId ? { kind: "AUTISTA" as const, id: selDriverId } : null,
-      selShopId ? { kind: "NEGOZIO" as const, id: selShopId } : null,
-      selDepotId ? { kind: "DEPOSITO" as const, id: selDepotId } : null,
-    ].filter(Boolean) as { kind: "AUTISTA" | "NEGOZIO" | "DEPOSITO"; id: string }[];
+  function validateSingleDestination(): { kind: "AUTISTA" | "NEGOZIO" | "DEPOSITO"; id: string; name: string } | null {
+    const chosen: { kind: "AUTISTA" | "NEGOZIO" | "DEPOSITO"; id: string; name: string }[] = [];
+
+    if (selDriverId) {
+      const d = drivers.find((x) => x.id === selDriverId);
+      chosen.push({ kind: "AUTISTA", id: selDriverId, name: d?.name ?? "—" });
+    }
+    if (selShopId) {
+      const s = shops.find((x) => x.id === selShopId);
+      chosen.push({ kind: "NEGOZIO", id: selShopId, name: s?.name ?? "—" });
+    }
+    if (selDepotId) {
+      const d = depots.find((x) => x.id === selDepotId);
+      chosen.push({ kind: "DEPOSITO", id: selDepotId, name: d?.name ?? "—" });
+    }
 
     if (chosen.length === 0) {
-      alert("Seleziona almeno 1 destinazione: Autista oppure Negozio oppure Deposito.");
+      alert("Seleziona 1 destinazione: Autista oppure Negozio oppure Deposito.");
       return null;
     }
     if (chosen.length > 1) {
@@ -215,44 +224,37 @@ export default function ScanPage() {
     return chosen[0];
   }
 
-  function updatePalletRegistry(pedanaCode: string, dest: { kind: "AUTISTA" | "NEGOZIO" | "DEPOSITO"; id: string }) {
+  function updateOrCreatePallet(code: string, dest: { kind: "AUTISTA" | "NEGOZIO" | "DEPOSITO"; name: string }) {
     const now = new Date().toLocaleString();
     const registry = safeParse<Pallet[]>(localStorage.getItem(STORAGE_PALLETS), []);
-
-    const driver = drivers.find((d) => d.id === dest.id);
-    const shop = shops.find((s) => s.id === dest.id);
-    const depot = depots.find((d) => d.id === dest.id);
 
     let newStatus: PalletStatus = "IN_DEPOSITO";
     let newLocation = "Deposito: —";
 
     if (dest.kind === "AUTISTA") {
       newStatus = "IN_TRANSITO";
-      newLocation = `Autista: ${driver?.name ?? "—"}`;
+      newLocation = `Autista: ${dest.name}`;
     } else if (dest.kind === "NEGOZIO") {
       newStatus = "IN_NEGOZIO";
-      newLocation = `Negozio: ${shop?.name ?? "—"}`;
+      newLocation = `Negozio: ${dest.name}`;
     } else {
       newStatus = "IN_DEPOSITO";
-      newLocation = `Deposito: ${depot?.name ?? "—"}`;
+      newLocation = `Deposito: ${dest.name}`;
     }
 
-    const idx = registry.findIndex((p) => p.code.toLowerCase() === pedanaCode.toLowerCase());
-
+    const idx = registry.findIndex((p) => p.code.toLowerCase() === code.toLowerCase());
     if (idx >= 0) {
       const updated = registry.map((p, i) =>
-        i === idx
-          ? { ...p, status: newStatus, locationLabel: newLocation, updatedAt: now }
-          : p
+        i === idx ? { ...p, status: newStatus, locationLabel: newLocation, updatedAt: now } : p
       );
       localStorage.setItem(STORAGE_PALLETS, JSON.stringify(updated));
       return;
     }
 
-    // Se non esiste, la creo (tipo default: "N/D")
+    // crea se non esiste
     const newPallet: Pallet = {
       id: uid(),
-      code: pedanaCode,
+      code,
       type: "N/D",
       status: newStatus,
       locationLabel: newLocation,
@@ -262,16 +264,12 @@ export default function ScanPage() {
     localStorage.setItem(STORAGE_PALLETS, JSON.stringify([newPallet, ...registry]));
   }
 
-  function saveToHistoryAndUpdateRegistry() {
+  function saveMovement() {
     const code = lastResult.trim();
     if (!code) return alert("Prima scansiona un QR.");
 
     const dest = validateSingleDestination();
     if (!dest) return;
-
-    const driver = drivers.find((d) => d.id === selDriverId);
-    const shop = shops.find((s) => s.id === selShopId);
-    const depot = depots.find((d) => d.id === selDepotId);
 
     const item: HistoryItem = {
       id: uid(),
@@ -280,21 +278,20 @@ export default function ScanPage() {
       lat: lat ?? undefined,
       lng: lng ?? undefined,
       accuracy: accuracy ?? undefined,
-      driverId: driver?.id,
-      driverName: driver?.name,
-      shopId: shop?.id,
-      shopName: shop?.name,
-      depotId: depot?.id,
-      depotName: depot?.name,
+      destinationKind: dest.kind,
+      destinationName: dest.name,
+      driverId: dest.kind === "AUTISTA" ? dest.id : undefined,
+      shopId: dest.kind === "NEGOZIO" ? dest.id : undefined,
+      depotId: dest.kind === "DEPOSITO" ? dest.id : undefined,
     };
 
     const prev = safeParse<HistoryItem[]>(localStorage.getItem(STORAGE_HISTORY), []);
     localStorage.setItem(STORAGE_HISTORY, JSON.stringify([item, ...prev]));
 
-    // ✅ aggiorna/crea anche la pedana nel registro
-    updatePalletRegistry(code, dest);
+    // ✅ aggiorna o crea pedana nel registro
+    updateOrCreatePallet(code, { kind: dest.kind, name: dest.name });
 
-    alert("✅ Salvato nello storico + aggiornato registro pedane!");
+    alert("✅ Movimento salvato + pedana aggiornata nel Registro!");
     clearAll();
   }
 
@@ -338,7 +335,7 @@ export default function ScanPage() {
     <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>📷 Scanner QR Pedane</h1>
       <p style={{ marginTop: 0, opacity: 0.85 }}>
-        Scan → GPS → scegli 1 destinazione (Autista/Negozio/Deposito) → salva → aggiorna anche Registro Pedane.
+        Scan → GPS → scegli 1 destinazione → salva movimento → aggiorna Registro Pedane.
       </p>
 
       <div style={{ padding: 12, borderRadius: 12, background: "#f2f2f2", marginBottom: 12, fontWeight: 700 }}>
@@ -346,12 +343,7 @@ export default function ScanPage() {
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <select
-          value={cameraId}
-          onChange={(e) => setCameraId(e.target.value)}
-          style={{ ...inputStyle, flex: "1 1 280px" }}
-          disabled={isRunning}
-        >
+        <select value={cameraId} onChange={(e) => setCameraId(e.target.value)} style={{ ...inputStyle, flex: "1 1 280px" }} disabled={isRunning}>
           {cameras.length === 0 ? (
             <option value="">Nessuna camera</option>
           ) : (
@@ -437,30 +429,25 @@ export default function ScanPage() {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-          <button onClick={saveToHistoryAndUpdateRegistry} style={btn("#2e7d32")}>
+          <button onClick={saveMovement} style={btn("#2e7d32")}>
             ✅ Salva movimento
           </button>
 
-          <a
-            href="/history"
-            style={{ ...btn("#6a1b9a"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-          >
+          <a href="/history" style={{ ...btn("#6a1b9a"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
             📄 Storico
           </a>
 
-          <a
-            href="/pallets"
-            style={{ ...btn("#0b1220"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-          >
+          <a href="/pallets" style={{ ...btn("#0b1220"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
             🧱 Registro Pedane
           </a>
 
-          <a
-            href="/"
-            style={{ ...btn("#455a64"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-          >
+          <a href="/" style={{ ...btn("#455a64"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
             ← Home
           </a>
+        </div>
+
+        <div style={{ marginTop: 10, opacity: 0.85, fontSize: 14 }}>
+          Nota: se la pedana non esiste nel registro, viene creata con tipo <b>N/D</b> (poi la modifichi in /pallets).
         </div>
       </div>
     </div>
