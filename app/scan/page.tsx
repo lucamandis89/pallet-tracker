@@ -86,25 +86,19 @@ export default function ScanPage() {
           setLastResult(decodedText);
           setStatus("✅ QR letto correttamente!");
 
-          // GPS + salvataggio storico
+          // GPS + storico
           if ("geolocation" in navigator) {
             navigator.geolocation.getCurrentPosition(
               (pos) => {
-                const lat = pos.coords.latitude;
-                const lng = pos.coords.longitude;
-                saveToHistory(decodedText, lat, lng);
+                saveToHistory(decodedText, pos.coords.latitude, pos.coords.longitude);
               },
-              () => {
-                // se GPS fallisce, salva comunque
-                saveToHistory(decodedText);
-              },
+              () => saveToHistory(decodedText),
               { enableHighAccuracy: true, timeout: 8000 }
             );
           } else {
             saveToHistory(decodedText);
           }
 
-          // stop subito dopo lettura
           stop().catch(() => {});
         },
         () => {}
@@ -126,11 +120,7 @@ export default function ScanPage() {
 
             if ("geolocation" in navigator) {
               navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                  const lat = pos.coords.latitude;
-                  const lng = pos.coords.longitude;
-                  saveToHistory(decodedText, lat, lng);
-                },
+                (pos) => saveToHistory(decodedText, pos.coords.latitude, pos.coords.longitude),
                 () => saveToHistory(decodedText),
                 { enableHighAccuracy: true, timeout: 8000 }
               );
@@ -178,6 +168,16 @@ export default function ScanPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const btn = (bg: string, color: string = "white") => ({
+    padding: "10px 14px",
+    borderRadius: 12,
+    border: "none",
+    fontWeight: 900,
+    cursor: "pointer",
+    background: bg,
+    color,
+  });
+
   return (
     <div style={{ padding: 16, maxWidth: 720, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 8 }}>📷 Scanner QR Pedane</h1>
@@ -205,7 +205,7 @@ export default function ScanPage() {
             padding: 10,
             borderRadius: 10,
             border: "1px solid #ddd",
-            flex: "1 1 280px",
+            flex: "1 1 260px",
           }}
           disabled={isRunning}
         >
@@ -220,34 +220,33 @@ export default function ScanPage() {
           )}
         </select>
 
-        <button
-          onClick={() => (isRunning ? stop() : start())}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 12,
-            border: "none",
-            fontWeight: 900,
-            cursor: "pointer",
-            background: isRunning ? "#e53935" : "#1e88e5",
-            color: "white",
-          }}
-        >
+        <button onClick={() => (isRunning ? stop() : start())} style={btn(isRunning ? "#e53935" : "#1e88e5")}>
           {isRunning ? "Ferma" : "Avvia"}
         </button>
 
         <button
           onClick={clearResult}
           style={{
-            padding: "10px 14px",
-            borderRadius: 12,
+            ...btn("white", "#111"),
             border: "1px solid #ddd",
-            fontWeight: 900,
-            cursor: "pointer",
-            background: "white",
           }}
         >
           Svuota
         </button>
+
+        {/* ✅ NUOVO: apri storico */}
+        <a
+          href="/history"
+          style={{
+            ...btn("#6a1b9a"),
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          📌 Apri storico
+        </a>
       </div>
 
       <div
