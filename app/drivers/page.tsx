@@ -1,179 +1,63 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { addDriver, downloadCsv, getDrivers, removeDriver, updateDriver, DriverItem } from "../lib/storage";
-
-async function getMyPosition(): Promise<{ lat: number; lng: number; accuracy?: number }> {
-  return new Promise((resolve, reject) => {
-    if (!("geolocation" in navigator)) return reject(new Error("no geo"));
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        }),
-      (err) => reject(err),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
-  });
-}
+import React, { useMemo, useState } from "react";
+import { addDriver, getDrivers, removeDriver, updateDriver, DriverItem } from "../lib/storage";
 
 export default function DriversPage() {
-  const [items, setItems] = useState<DriverItem[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [list, setList] = useState<DriverItem[]>(() => getDrivers());
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [notes, setNotes] = useState("");
 
-  const emptyForm = useMemo(
-    () => ({
-      name: "",
-      phone: "",
-      address: "",
-      lat: "",
-      lng: "",
-      notes: "",
-    }),
-    []
-  );
+  const count = useMemo(() => list.length, [list]);
 
-  const [form, setForm] = useState<any>(emptyForm);
-  const [msg, setMsg] = useState<string>("");
-
-  function reload() {
-    setItems(getDrivers());
+  function refresh() {
+    setList(getDrivers());
   }
-
-  useEffect(() => {
-    reload();
-  }, []);
 
   function resetForm() {
-    setEditingId(null);
-    setForm(emptyForm);
-    setMsg("");
+    setName("");
+    setPhone("");
+    setNotes("");
   }
 
-  function startEdit(it: DriverItem) {
-    setEditingId(it.id);
-    setForm({
-      name: it.name || "",
-      phone: it.phone || "",
-      address: it.address || "",
-      lat: it.lat ?? "",
-      lng: it.lng ?? "",
-      notes: it.notes || "",
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function del(id: string) {
-    if (!confirm("Eliminare questo autista?")) return;
-    removeDriver(id);
-    reload();
-    if (editingId === id) resetForm();
-  }
-
-  async function fillMyPosition() {
-    setMsg("");
+  function onAdd() {
+    const n = name.trim();
+    if (!n) return alert("Inserisci il nome autista.");
     try {
-      const p = await getMyPosition();
-      setForm((f: any) => ({ ...f, lat: p.lat, lng: p.lng }));
-      setMsg("📍 Posizione inserita.");
-    } catch {
-      setMsg("❌ GPS non disponibile o permesso negato.");
-    }
-  }
-
-  function save() {
-    setMsg("");
-
-    const name = String(form.name || "").trim();
-    if (!name) return alert("Inserisci il nome dell’autista.");
-
-    const phone = String(form.phone || "").trim();
-    const address = String(form.address || "").trim();
-    const notes = String(form.notes || "").trim();
-
-    const latNum = form.lat === "" ? undefined : Number(form.lat);
-    const lngNum = form.lng === "" ? undefined : Number(form.lng);
-
-    if ((latNum !== undefined && Number.isNaN(latNum)) || (lngNum !== undefined && Number.isNaN(lngNum))) {
-      return alert("Latitudine/Longitudine non valide.");
-    }
-
-    if (editingId) {
-      updateDriver(editingId, {
-        name,
-        phone: phone || undefined,
-        address: address || undefined,
-        notes: notes || undefined,
-        lat: latNum,
-        lng: lngNum,
-      });
-      reload();
+      addDriver({ name: n, phone: phone.trim() || undefined, notes: notes.trim() || undefined });
+      refresh();
       resetForm();
-      setMsg("✅ Autista modificato.");
-      return;
-    }
-
-    try {
-      addDriver({
-        name,
-        phone: phone || undefined,
-        address: address || undefined,
-        notes: notes || undefined,
-        lat: latNum,
-        lng: lngNum,
-      });
-      reload();
-      resetForm();
-      setMsg("✅ Autista aggiunto.");
     } catch (e: any) {
-      if (String(e?.message) === "LIMIT_10") {
-        alert("Limite massimo autisti raggiunto: 10");
-      } else {
-        alert("Errore durante il salvataggio.");
-      }
+      if (e?.message === "LIMIT_10") alert("Limite raggiunto: massimo 10 autisti.");
+      else alert("Errore: " + (e?.message || "sconosciuto"));
     }
   }
 
-  function exportCsv() {
-    const all = getDrivers();
-    downloadCsv(
-      "autisti.csv",
-      ["id", "name", "phone", "address", "lat", "lng", "notes", "createdAt"],
-      all.map((d) => [
-        d.id,
-        d.name,
-        d.phone || "",
-        d.address || "",
-        d.lat ?? "",
-        d.lng ?? "",
-        d.notes || "",
-        new Date(d.createdAt).toISOString(),
-      ])
-    );
+  function onEdit(item: DriverItem) {
+    const newName = prompt("Nome autista:", item.name);
+    if (newName === null) return;
+    const n = newName.trim();
+    if (!n) return alert("Nome non valido.");
+
+    const newPhone = prompt("Telefono (facoltativo):", item.phone || "") ?? item.phone || "";
+    const newNotes = prompt("Note (facoltative):", item.notes || "") ?? item.notes || "";
+
+    updateDriver(item.id, {
+      name: n,
+      phone: newPhone.trim() || undefined,
+      notes: newNotes.trim() || undefined,
+    });
+    refresh();
   }
 
-  const cardStyle: React.CSSProperties = {
-    background: "white",
-    border: "1px solid #e9e9e9",
-    borderRadius: 16,
-    padding: 14,
-    boxShadow: "0 6px 18px rgba(0,0,0,0.05)",
-  };
+  function onDelete(item: DriverItem) {
+    if (!confirm(`Eliminare autista "${item.name}"?`)) return;
+    removeDriver(item.id);
+    refresh();
+  }
 
-  const btn = (bg: string, color = "white") => ({
-    padding: "12px 14px",
-    borderRadius: 14,
-    border: "none",
-    fontWeight: 900 as const,
-    cursor: "pointer",
-    background: bg,
-    color,
-  });
-
-  const inputStyle: React.CSSProperties = {
+  const input: React.CSSProperties = {
     padding: 12,
     borderRadius: 12,
     border: "1px solid #ddd",
@@ -181,132 +65,103 @@ export default function DriversPage() {
     fontWeight: 700,
   };
 
+  const btn = (bg: string): React.CSSProperties => ({
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "none",
+    fontWeight: 900,
+    cursor: "pointer",
+    background: bg,
+    color: "white",
+  });
+
+  const card: React.CSSProperties = {
+    padding: 14,
+    borderRadius: 16,
+    border: "2px solid #1976d2",
+    background: "#e3f2fd",
+    marginTop: 12,
+  };
+
   return (
-    <div style={{ padding: 16, maxWidth: 860, margin: "0 auto" }}>
+    <div style={{ padding: 16, maxWidth: 760, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>🚚 Gestione Autisti</h1>
-      <div style={{ opacity: 0.85, fontWeight: 700 }}>
-        Inserisci autisti con contatti e posizione GPS. (Max 10 autisti)
+      <p style={{ marginTop: 0, opacity: 0.85 }}>
+        Massimo <b>10 autisti</b>. Servono per assegnare le pedane quando sono in viaggio.
+      </p>
+
+      <div style={{ padding: 12, borderRadius: 12, background: "#f2f2f2", fontWeight: 900 }}>
+        Totale autisti: {count} / 10
       </div>
 
-      <div style={{ ...cardStyle, marginTop: 14, marginBottom: 14 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 10 }}>
-          {editingId ? "✏️ Modifica Autista" : "➕ Nuovo Autista"}
-        </h2>
+      <div style={card}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Aggiungi Autista</div>
 
         <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
-          <input
-            placeholder="Nome e Cognome *"
-            value={form.name}
-            onChange={(e) => setForm((f: any) => ({ ...f, name: e.target.value }))}
-            style={{ ...inputStyle, gridColumn: "1 / -1" }}
-          />
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Nome *</div>
+            <input value={name} onChange={(e) => setName(e.target.value)} style={input} placeholder="Es: Mario Rossi" />
+          </div>
 
-          <input
-            placeholder="Telefono"
-            value={form.phone}
-            onChange={(e) => setForm((f: any) => ({ ...f, phone: e.target.value }))}
-            style={inputStyle}
-          />
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Telefono</div>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              style={input}
+              placeholder="Facoltativo"
+              inputMode="tel"
+            />
+          </div>
 
-          <input
-            placeholder="Indirizzo"
-            value={form.address}
-            onChange={(e) => setForm((f: any) => ({ ...f, address: e.target.value }))}
-            style={inputStyle}
-          />
-
-          <input
-            placeholder="Latitudine"
-            value={form.lat}
-            onChange={(e) => setForm((f: any) => ({ ...f, lat: e.target.value }))}
-            style={inputStyle}
-            inputMode="decimal"
-          />
-
-          <input
-            placeholder="Longitudine"
-            value={form.lng}
-            onChange={(e) => setForm((f: any) => ({ ...f, lng: e.target.value }))}
-            style={inputStyle}
-            inputMode="decimal"
-          />
-
-          <textarea
-            placeholder="Note (facoltative)"
-            value={form.notes}
-            onChange={(e) => setForm((f: any) => ({ ...f, notes: e.target.value }))}
-            style={{
-              ...inputStyle,
-              gridColumn: "1 / -1",
-              minHeight: 90,
-              resize: "vertical",
-            }}
-          />
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Note</div>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} style={input} placeholder="Facoltative" />
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-          <button onClick={save} style={btn("#1e88e5")}>
-            {editingId ? "Salva Modifica" : "Aggiungi Autista"}
+          <button onClick={onAdd} style={btn("#2e7d32")}>
+            Salva Autista
           </button>
-
-          <button onClick={resetForm} style={btn("#eeeeee", "#111")}>
-            Annulla
-          </button>
-
-          <button onClick={fillMyPosition} style={btn("#2e7d32")}>
-            📍 Usa mia posizione
-          </button>
-
-          <button onClick={exportCsv} style={btn("#6a1b9a")}>
-            ⬇️ Export CSV
+          <button onClick={resetForm} style={btn("#616161")}>
+            Svuota
           </button>
         </div>
-
-        {msg ? (
-          <div style={{ marginTop: 12, fontWeight: 900, color: msg.includes("❌") ? "#c62828" : "#2e7d32" }}>
-            {msg}
-          </div>
-        ) : null}
       </div>
 
-      <div style={cardStyle}>
-        <h2 style={{ marginTop: 0 }}>📋 Elenco Autisti</h2>
+      <div style={{ marginTop: 14 }}>
+        <h2 style={{ marginBottom: 8 }}>📋 Elenco</h2>
 
-        {items.length === 0 ? (
-          <div style={{ opacity: 0.8 }}>Nessun autista inserito.</div>
+        {list.length === 0 ? (
+          <div style={{ padding: 14, borderRadius: 14, border: "1px solid #ddd", background: "white" }}>
+            Nessun autista inserito.
+          </div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {items.map((d) => (
-              <div key={d.id} style={{ border: "1px solid #eee", borderRadius: 14, padding: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontWeight: 900, fontSize: 18 }}>{d.name}</div>
-                    <div style={{ opacity: 0.85, fontWeight: 700 }}>
-                      {d.phone ? `📞 ${d.phone}` : "📞 —"}
-                      {d.address ? ` • 📍 ${d.address}` : ""}
-                    </div>
-                    <div style={{ opacity: 0.75, marginTop: 4, fontWeight: 700 }}>
-                      GPS: {d.lat ?? "—"} , {d.lng ?? "—"}
-                    </div>
-                    {d.notes ? (
-                      <div style={{ marginTop: 6, opacity: 0.85, fontWeight: 700 }}>
-                        📝 {d.notes}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => startEdit(d)} style={btn("#ffb300", "#111")}>
-                      Modifica
-                    </button>
-                    <button onClick={() => del(d.id)} style={btn("#e53935")}>
-                      Elimina
-                    </button>
-                  </div>
+            {list.map((d) => (
+              <div
+                key={d.id}
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  border: "1px solid #ddd",
+                  background: "white",
+                }}
+              >
+                <div style={{ fontSize: 18, fontWeight: 900 }}>{d.name}</div>
+                <div style={{ opacity: 0.85, marginTop: 4 }}>
+                  {d.phone ? <>📞 {d.phone} &nbsp; </> : null}
+                  {d.notes ? <>📝 {d.notes}</> : null}
                 </div>
 
-                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
-                  Creato: {new Date(d.createdAt).toLocaleString()}
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                  <button onClick={() => onEdit(d)} style={btn("#1565c0")}>
+                    Modifica
+                  </button>
+                  <button onClick={() => onDelete(d)} style={btn("#c62828")}>
+                    Elimina
+                  </button>
                 </div>
               </div>
             ))}
