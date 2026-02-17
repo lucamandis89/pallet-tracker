@@ -30,6 +30,7 @@ export default function ShopsPage() {
       border: "1px solid #ddd",
       fontSize: 16,
       outline: "none",
+      background: "white",
     } as const;
 
     const btn = (bg: string) =>
@@ -51,7 +52,7 @@ export default function ShopsPage() {
     setDef(getDefaultShop());
   }
 
-  async function captureGps() {
+  function captureGps() {
     if (!navigator.geolocation) {
       alert("Geolocalizzazione non supportata.");
       return;
@@ -86,17 +87,52 @@ export default function ShopsPage() {
   }
 
   function edit(s: ShopItem) {
-    const newName = prompt("Nome negozio:", s.name) ?? s.name;
-    const newAddress = prompt("Indirizzo:", s.address ?? "") ?? (s.address ?? "");
-    const newCity = prompt("Città:", s.city ?? "") ?? (s.city ?? "");
-    const newNote = prompt("Note:", s.note ?? "") ?? (s.note ?? "");
-    updateShop(s.id, {
-      name: newName.trim() || s.name,
-      address: newAddress.trim() || undefined,
-      city: newCity.trim() || undefined,
-      note: newNote.trim() || undefined,
+    // niente prompt: usiamo una edit veloce ma stabile via prompt SOLO se vuoi.
+    // Qui faccio una modifica "morbida": riempio i campi e ti faccio premere "Aggiorna".
+    setName(s.name);
+    setAddress(s.address ?? "");
+    setCity(s.city ?? "");
+    setNote(s.note ?? "");
+    setLat(s.lat != null ? String(s.lat) : "");
+    setLng(s.lng != null ? String(s.lng) : "");
+
+    // salva id in sessione (stabile senza cambiare storage)
+    sessionStorage.setItem("editingShopId", s.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function saveEditIfAny() {
+    const id = sessionStorage.getItem("editingShopId");
+    if (!id) return add();
+
+    if (!name.trim()) return alert("Inserisci il nome negozio.");
+    updateShop(id, {
+      name: name.trim(),
+      address: address.trim() || undefined,
+      city: city.trim() || undefined,
+      note: note.trim() || undefined,
+      lat: lat ? Number(lat) : undefined,
+      lng: lng ? Number(lng) : undefined,
     });
+
+    sessionStorage.removeItem("editingShopId");
+    setName("");
+    setAddress("");
+    setCity("");
+    setNote("");
+    setLat("");
+    setLng("");
     reload();
+  }
+
+  function cancelEdit() {
+    sessionStorage.removeItem("editingShopId");
+    setName("");
+    setAddress("");
+    setCity("");
+    setNote("");
+    setLat("");
+    setLng("");
   }
 
   function del(id: string) {
@@ -109,6 +145,8 @@ export default function ShopsPage() {
     setDefaultShop(id);
     reload();
   }
+
+  const editingId = typeof window !== "undefined" ? sessionStorage.getItem("editingShopId") : null;
 
   return (
     <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
@@ -128,55 +166,30 @@ export default function ShopsPage() {
           background: "white",
         }}
       >
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>➕ Aggiungi negozio</div>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>
+          {editingId ? "✏️ Modifica negozio" : "➕ Aggiungi negozio"}
+        </div>
 
         <div style={{ display: "grid", gap: 10 }}>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nome negozio"
-            style={styles.input}
-          />
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="Indirizzo (opz.)"
-            style={styles.input}
-          />
-          <input
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="Città (opz.)"
-            style={styles.input}
-          />
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Note (opz.)"
-            style={styles.input}
-          />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome negozio" style={styles.input} />
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Indirizzo (opz.)" style={styles.input} />
+          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città (opz.)" style={styles.input} />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (opz.)" style={styles.input} />
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <input
-              value={lat}
-              onChange={(e) => setLat(e.target.value)}
-              placeholder="Latitudine (opz.)"
-              style={{ ...styles.input, flex: "1 1 180px" }}
-            />
-            <input
-              value={lng}
-              onChange={(e) => setLng(e.target.value)}
-              placeholder="Longitudine (opz.)"
-              style={{ ...styles.input, flex: "1 1 180px" }}
-            />
-            <button onClick={captureGps} style={styles.btn("#6a1b9a")}>
-              📍 Prendi GPS
-            </button>
+            <input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="Latitudine (opz.)" style={{ ...styles.input, flex: "1 1 180px" }} />
+            <input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="Longitudine (opz.)" style={{ ...styles.input, flex: "1 1 180px" }} />
+            <button onClick={captureGps} style={styles.btn("#6a1b9a")}>📍 Prendi GPS</button>
           </div>
 
-          <button onClick={add} style={styles.btn("#1b9a4a")}>
-            + Aggiungi negozio
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={saveEditIfAny} style={styles.btn("#2e7d32")}>
+              {editingId ? "Aggiorna" : "+ Aggiungi"}
+            </button>
+            {editingId ? (
+              <button onClick={cancelEdit} style={styles.btn("#616161")}>Annulla modifica</button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -208,16 +221,10 @@ export default function ShopsPage() {
                   {s.note ? <div style={{ marginTop: 6 }}>{s.note}</div> : null}
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 130 }}>
-                  <button onClick={() => edit(s)} style={styles.btn("#1e88e5")}>
-                    Modifica
-                  </button>
-                  <button onClick={() => setDefault(s.id)} style={styles.btn("#0b1220")}>
-                    Default
-                  </button>
-                  <button onClick={() => del(s.id)} style={styles.btn("#e53935")}>
-                    Elimina
-                  </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 140 }}>
+                  <button onClick={() => edit(s)} style={styles.btn("#1e88e5")}>Modifica</button>
+                  <button onClick={() => setDefault(s.id)} style={styles.btn("#0b1220")}>Default</button>
+                  <button onClick={() => del(s.id)} style={styles.btn("#e53935")}>Elimina</button>
                 </div>
               </div>
             </div>
