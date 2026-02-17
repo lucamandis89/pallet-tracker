@@ -1,68 +1,75 @@
+// app/drivers/page.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { addDriver, getDrivers, removeDriver, updateDriver } from "../lib/storage";
+import React, { useState } from "react";
+import { addDriver, getDrivers, removeDriver, updateDriver, DriverItem } from "../lib/storage";
 
 export default function DriversPage() {
   const [refresh, setRefresh] = useState(0);
-  const list = useMemo(() => getDrivers(), [refresh]);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+
+  const list = getDrivers();
 
   function add() {
-    const name = prompt("Nome autista:");
-    if (!name?.trim()) return;
-    const phone = prompt("Telefono (opz.)") || "";
-    const note = prompt("Note (opz.)") || "";
-    addDriver(name.trim(), phone.trim() || undefined, note.trim() || undefined);
+    addDriver(name, phone);
+    setName("");
+    setPhone("");
     setRefresh((x) => x + 1);
   }
 
-  function edit(id: string) {
-    const d = list.find((x) => x.id === id);
-    if (!d) return;
-    const name = prompt("Nome:", d.name) ?? d.name;
-    const phone = prompt("Telefono:", d.phone || "") ?? (d.phone || "");
-    const note = prompt("Note:", d.note || "") ?? (d.note || "");
-    updateDriver(id, { name: name.trim(), phone: phone.trim() || undefined, note: note.trim() || undefined });
+  function edit(d: DriverItem) {
+    const n = prompt("Nome autista", d.name) ?? d.name;
+    const p = prompt("Telefono (opz.)", d.phone ?? "") ?? (d.phone ?? "");
+    updateDriver({ ...d, name: n.trim() || d.name, phone: p.trim() || "" });
     setRefresh((x) => x + 1);
   }
 
   function del(id: string) {
-    if (!confirm("Eliminare autista?")) return;
+    if (!confirm("Eliminare questo autista?")) return;
     removeDriver(id);
     setRefresh((x) => x + 1);
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
+    <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
       <h1 style={{ fontSize: 28, marginBottom: 6 }}>🚚 Gestione Autisti</h1>
+
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <a href="/" style={link()}>← Home</a>
-        <button style={btn("#1e88e5")} onClick={add}>+ Aggiungi autista</button>
-        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
+        <a href="/scan" style={link()}>Scanner</a>
       </div>
 
       <div style={box()}>
-        {list.length === 0 ? <div style={{ opacity: 0.75 }}>Nessun autista. Aggiungine uno.</div> : null}
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Aggiungi autista</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome" style={inp()} />
+        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefono (opz.)" style={inp()} />
+        <button onClick={add} style={btn("#2e7d32")}>Aggiungi</button>
+      </div>
+
+      <div style={box()}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>Elenco</div>
+        {list.length === 0 ? <div style={{ opacity: 0.7 }}>Nessun autista.</div> : null}
         <div style={{ display: "grid", gap: 10 }}>
           {list.map((d) => (
             <div key={d.id} style={card()}>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>{d.name}</div>
-              <div style={{ opacity: 0.85 }}>
-                {d.phone ? `📞 ${d.phone}` : "📞 (nessun telefono)"} {d.note ? ` • 📝 ${d.note}` : ""}
-              </div>
+              <div style={{ fontWeight: 900 }}>{d.name}</div>
+              {d.phone ? <div style={{ opacity: 0.8 }}>{d.phone}</div> : null}
               <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                <button style={btn("#455a64")} onClick={() => edit(d.id)}>Modifica</button>
-                <button style={btn("#e53935")} onClick={() => del(d.id)}>Elimina</button>
+                <button onClick={() => edit(d)} style={btn("#455a64")}>Modifica</button>
+                <button onClick={() => del(d.id)} style={btn("#e53935")}>Elimina</button>
               </div>
             </div>
           ))}
         </div>
       </div>
+      <div style={{ opacity: 0, height: 1 }}>{refresh}</div>
     </div>
   );
 }
 
 const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fafafa" });
+const card = (): React.CSSProperties => ({ padding: 12, borderRadius: 14, border: "1px solid #eee" });
+const inp = (): React.CSSProperties => ({ padding: 12, borderRadius: 12, border: "1px solid #ddd", width: "100%", marginBottom: 10, fontWeight: 800 });
 const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
 const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
