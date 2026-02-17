@@ -1,88 +1,118 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { deletePallet, formatDT, getPallets, upsertPallet } from "../lib/storage";
+import { deletePallet, getPallets, type PalletItem, type PalletType } from "../lib/storage";
+
+const PALLET_TYPES: PalletType[] = ["EUR/EPAL", "CHEP", "LPR", "IFCO", "CP", "ALTRO"];
 
 export default function PalletsPage() {
-  const [refresh, setRefresh] = useState(0);
-  const list = useMemo(() => getPallets(), [refresh]);
+  const [list, setList] = useState<PalletItem[]>(() => getPallets());
+  const [q, setQ] = useState("");
 
-  function add() {
-    const code = prompt("Codice pedana (es: PEDANA-000123):");
-    if (!code?.trim()) return;
-    const type = prompt("Tipo pedana (es: EUR/EPAL, CHEP, IFCO...) (opz.)") || "";
-    const alt = prompt("Codice alternativo (opz.)") || "";
-    const notes = prompt("Note (opz.)") || "";
-    upsertPallet({ code: code.trim(), palletType: type.trim() || undefined, altCode: alt.trim() || undefined, notes: notes.trim() || undefined });
-    setRefresh((x) => x + 1);
+  const styles = useMemo(() => {
+    const btn = (bg: string) =>
+      ({
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: "none",
+        fontWeight: 900,
+        cursor: "pointer",
+        background: bg,
+        color: "white",
+      } as const);
+
+    return { btn };
+  }, []);
+
+  function reload() {
+    setList(getPallets());
   }
 
-  function edit(id: string) {
-    const p = list.find((x) => x.id === id);
-    if (!p) return;
-    const type = prompt("Tipo pedana:", p.palletType || "") ?? (p.palletType || "");
-    const alt = prompt("Codice alternativo:", p.altCode || "") ?? (p.altCode || "");
-    const notes = prompt("Note:", p.notes || "") ?? (p.notes || "");
-    upsertPallet({ code: p.code, palletType: type.trim() || undefined, altCode: alt.trim() || undefined, notes: notes.trim() || undefined });
-    setRefresh((x) => x + 1);
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return list;
+    return list.filter((p) => p.code.toLowerCase().includes(s) || (p.locationLabel ?? "").toLowerCase().includes(s));
+  }, [list, q]);
+
+  function edit(p: PalletItem) {
+    // edit semplice via prompt (stabile)
+    const newType = (prompt("Tipo pedana (EUR/EPAL/CHEP/LPR/IFCO/CP/ALTRO):", p.type) ?? p.type).trim() as PalletType;
+    const finalType = PALLET_TYPES.includes(newType) ? newType : p.type;
+
+    const qtyStr = (prompt("Quantità:", String(p.qty)) ?? String(p.qty)).trim();
+    const newQty = Number(qtyStr);
+    const finalQty = Number.isFinite(newQty) && newQty > 0 ? Math.floor(newQty) : p.qty;
+
+    const newAlt = (prompt("Codice alternativo (opz.):", p.altCode ?? "") ?? (p.altCode ?? "")).trim();
+    const newNotes = (prompt("Note (opz.):", p.notes ?? "") ?? (p.notes ?? "")).trim();
+
+    // aggiorno ri-salvando tramite local list (usiamo storage setPallets)
+    const all = getPallets().map((x) =>
+      x.id === p.id ? { ...x, type: finalType, qty: finalQty, altCode: newAlt || undefined, notes: newNotes || undefined, updatedAt: Date.now() } : x
+    );
+
+    // setPallets non è esportato qui: faccio trick import inline
+    import("../lib/storage").then(({ setPallets }) => {
+      setPallets(all);
+      reload();
+    });
   }
 
   function del(id: string) {
     if (!confirm("Eliminare pedana dal registro?")) return;
     deletePallet(id);
-    setRefresh((x) => x + 1);
+    reload();
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 1050, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>🧱 Registro Pedane</h1>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <a href="/" style={link()}>← Home</a>
-        <button style={btn("#2e7d32")} onClick={add}>+ Aggiungi pedana</button>
-        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
+    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
+      <h1 style={{ margin: 0, fontSize: 32 }}>🧱 Registro Pedane</h1>
+      <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <a href="/" style={{ color: "#1e88e5", fontWeight: 800, textDecoration: "none" }}>← Home</a>
+        <a href="/scan" style={{ color: "#0b1220", fontWeight: 900, textDecoration: "none" }}>📷 Vai a Scansione</a>
       </div>
 
-      <div style={box()}>
-        {list.length === 0 ? <div style={{ opacity: 0.75 }}>Nessuna pedana nel registro.</div> : null}
+      <div style={{ marginTop: 14, padding: 14, borderRadius: 16, border: "1px solid #e6e6e6", background: "white" }}>
+        <div style={{ fontWeight: 900, marginBottom: 8 }}>🔎 Cerca</div>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Cerca per codice o posizione..."
+          style={{ width: "100%", padding: 12, borderRadius: 12, border: "1px solid #ddd", fontSize: 16 }}
+        />
+      </div>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          {list.map((p) => (
-            <div key={p.id} style={card()}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ fontWeight: 900, fontSize: 18 }}>{p.code}</div>
-                <div style={{ opacity: 0.8 }}>
-                  Ultimo visto: {p.lastSeenTs ? formatDT(p.lastSeenTs) : "—"}
+      <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+        {filtered.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Nessuna pedana trovata.</div>
+        ) : (
+          filtered.map((p) => (
+            <div key={p.id} style={{ padding: 14, borderRadius: 16, border: "1px solid #e6e6e6", background: "white" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 1000, fontSize: 18 }}>{p.code}</div>
+                  <div style={{ opacity: 0.85, marginTop: 4 }}>
+                    Tipo: <b>{p.type}</b> · Qty: <b>{p.qty}</b>
+                  </div>
+                  <div style={{ opacity: 0.85, marginTop: 4 }}>
+                    Posizione: <b>{p.locationLabel ?? "—"}</b> ({p.locationKind})
+                  </div>
+                  <div style={{ opacity: 0.7, fontSize: 13, marginTop: 4 }}>
+                    GPS: {p.lat ?? "—"} / {p.lng ?? "—"}
+                  </div>
+                  {p.altCode ? <div style={{ marginTop: 6 }}>Alt: <b>{p.altCode}</b></div> : null}
+                  {p.notes ? <div style={{ marginTop: 6 }}>{p.notes}</div> : null}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 140 }}>
+                  <button onClick={() => edit(p)} style={styles.btn("#1e88e5")}>Modifica</button>
+                  <button onClick={() => del(p.id)} style={styles.btn("#e53935")}>Elimina</button>
                 </div>
               </div>
-
-              <div style={{ opacity: 0.9, marginTop: 6 }}>
-                Tipo: <b>{p.palletType || "—"}</b> {p.altCode ? ` • Alt: ${p.altCode}` : ""}
-              </div>
-
-              <div style={{ opacity: 0.9, marginTop: 6 }}>
-                Posizione: <b>{p.locationKind || "—"}</b> {p.locationId ? `(${p.locationId})` : ""}
-              </div>
-
-              <div style={{ opacity: 0.85, marginTop: 6 }}>
-                GPS: {p.lastLat ?? "—"}, {p.lastLng ?? "—"} {p.lastAccuracy ? `±${Math.round(p.lastAccuracy)}m` : ""}
-              </div>
-
-              {p.notes ? <div style={{ marginTop: 8, opacity: 0.9 }}>📝 {p.notes}</div> : null}
-
-              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-                <button style={btn("#455a64")} onClick={() => edit(p.id)}>Modifica</button>
-                <button style={btn("#e53935")} onClick={() => del(p.id)}>Elimina</button>
-              </div>
             </div>
-          ))}
-        </div>
+          ))
+        )}
       </div>
     </div>
   );
 }
-
-const box = (): React.CSSProperties => ({ marginTop: 14, padding: 14, borderRadius: 14, border: "1px solid #eee", background: "white" });
-const card = (): React.CSSProperties => ({ padding: 14, borderRadius: 14, border: "1px solid #eee", background: "#fafafa" });
-const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
-const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
