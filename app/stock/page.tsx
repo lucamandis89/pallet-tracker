@@ -1,422 +1,362 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  addStockMove,
+  downloadCsv,
+  getDefaultDepot,
+  getDepotOptions,
+  getDrivers,
+  getShops,
+  getStockMoves,
+  getStockRows,
+  StockLocationKind,
+} from "../lib/storage";
 
-type Shop = { id: string; name: string; address: string; phone?: string; note?: string; createdAt: string };
-
-type StockRow = {
-  shopId: string;
-  shopName: string;
-  // quantità per tipo (chiave = tipo)
-  byType: Record<string, number>;
-  updatedAt: string;
-};
-
-type StockMove = {
-  id: string;
-  ts: string;
-  shopId: string;
-  shopName: string;
-  type: string;
-  delta: number; // + / -
-  note?: string;
-};
-
-const STORAGE_SHOPS = "pallet_shops";
-const STORAGE_TYPES = "pallet_types_v1"; // tipi personalizzati salvati da /pallets
-const STORAGE_STOCK = "pallet_stock_v1";
-const STORAGE_STOCK_MOVES = "pallet_stock_moves_v1";
-
-function uid() {
-  return Date.now().toString() + "_" + Math.random().toString(16).slice(2);
-}
-
-function safeParse<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-const DEFAULT_TYPES = [
-  "EPAL (EUR) 1200x800",
-  "EPAL 2 1200x1000",
-  "Half pallet 800x600",
-  "Display pallet",
-  "CHEP Blue",
-  "CHEP Red",
+const PALLET_TYPES = [
+  "EUR / EPAL",
+  "CHEP",
   "LPR",
+  "IFCO",
   "DUSS",
-  "IFCO (casse/RTI)",
-  "IPP / FSW",
-  "CP (Chemical)",
-  "US Pallet 48x40",
+  "ROOL",
+  "Altro",
 ];
 
-function toCSV(rows: StockRow[]) {
-  // header: shopId, shopName, updatedAt, ...types
-  const allTypes = Array.from(
-    new Set(
-      rows.flatMap((r) => Object.keys(r.byType || {}))
-    )
-  ).sort((a, b) => a.localeCompare(b));
-
-  const header = ["shopId", "shopName", "updatedAt", ...allTypes];
-
-  const esc = (v: any) => {
-    const s = v === undefined || v === null ? "" : String(v);
-    const needs = /[",\n;]/.test(s);
-    const out = s.replace(/"/g, '""');
-    return needs ? `"${out}"` : out;
-  };
-
-  const lines = [header.join(",")];
-  for (const r of rows) {
-    const line = [
-      r.shopId,
-      r.shopName,
-      r.updatedAt,
-      ...allTypes.map((t) => r.byType?.[t] ?? 0),
-    ].map(esc);
-    lines.push(line.join(","));
-  }
-  return lines.join("\n");
-}
-
 export default function StockPage() {
-  const [shops, setShops] = useState<Shop[]>([]);
-  const [types, setTypes] = useState<string[]>([]);
-  const [rows, setRows] = useState<StockRow[]>([]);
-  const [moves, setMoves] = useState<StockMove[]>([]);
+  const [rows, setRows] = useState(getStockRows());
+  const [moves, setMoves] = useState(getStockMoves());
 
-  const [q, setQ] = useState("");
+  // form movimento
+  const [palletType, setPalletType] = useState(PALLET_TYPES[0]);
+  const [qty, setQty] = useState<number>(1);
 
-  // form aggiornamento
-  const [selShopId, setSelShopId] = useState("");
-  const [selType, setSelType] = useState(DEFAULT_TYPES[0]);
-  const [delta, setDelta] = useState<number>(1);
+  const [fromKind, setFromKind] = useState<StockLocationKind>("DEPOSITO");
+  const [fromId, setFromId] = useState<string>(getDefaultDepot().id);
+
+  const [toKind, setToKind] = useState<StockLocationKind>("NEGOZIO");
+  const [toId, setToId] = useState<string>("");
+
   const [note, setNote] = useState("");
+  const [msg, setMsg] = useState("");
 
-  // init
+  const depots = useMemo(() => getDepotOptions(), []);
+  const drivers = useMemo(() => getDrivers(), []);
+  const shops = useMemo(() => getShops(), []);
+
+  function reload() {
+    setRows(getStockRows());
+    setMoves(getStockMoves());
+  }
+
   useEffect(() => {
-    const s = safeParse<Shop[]>(localStorage.getItem(STORAGE_SHOPS), []);
-    setShops(s);
-
-    const custom = safeParse<string[]>(localStorage.getItem(STORAGE_TYPES), []);
-    const mergedTypes = Array.from(new Set([...DEFAULT_TYPES, ...custom])).sort((a, b) => a.localeCompare(b));
-    setTypes(mergedTypes);
-
-    const savedRows = safeParse<StockRow[]>(localStorage.getItem(STORAGE_STOCK), []);
-    setRows(savedRows);
-
-    const savedMoves = safeParse<StockMove[]>(localStorage.getItem(STORAGE_STOCK_MOVES), []);
-    setMoves(savedMoves);
-
-    // default shop selezionato
-    if (s[0]?.id) setSelShopId(s[0].id);
+    // default ToId se esiste qualcosa
+    if (!toId) {
+      if (toKind === "NEGOZIO" && shops[0]?.id) setToId(shops[0].id);
+      if (toKind === "AUTISTA" && drivers[0]?.id) setToId(drivers[0].id);
+      if (toKind === "DEPOSITO" && depots[0]?.id) setToId(depots[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function persistRows(next: StockRow[]) {
-    setRows(next);
-    localStorage.setItem(STORAGE_STOCK, JSON.stringify(next));
+  useEffect(() => {
+    // aggiorna id quando cambi kind
+    if (fromKind === "DEPOSITO") setFromId(getDefaultDepot().id);
+    if (fromKind === "NEGOZIO") setFromId(shops[0]?.id || "");
+    if (fromKind === "AUTISTA") setFromId(drivers[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromKind]);
+
+  useEffect(() => {
+    if (toKind === "DEPOSITO") setToId(getDefaultDepot().id);
+    if (toKind === "NEGOZIO") setToId(shops[0]?.id || "");
+    if (toKind === "AUTISTA") setToId(drivers[0]?.id || "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toKind]);
+
+  function nameOf(kind: StockLocationKind, id: string) {
+    if (kind === "DEPOSITO") return depots.find((d) => d.id === id)?.name || "Deposito";
+    if (kind === "AUTISTA") return drivers.find((d) => d.id === id)?.name || "Autista";
+    return shops.find((s) => s.id === id)?.name || "Negozio";
   }
 
-  function persistMoves(next: StockMove[]) {
-    setMoves(next);
-    localStorage.setItem(STORAGE_STOCK_MOVES, JSON.stringify(next));
+  function optionsFor(kind: StockLocationKind) {
+    if (kind === "DEPOSITO") return depots.map((d) => ({ id: d.id, label: d.name }));
+    if (kind === "AUTISTA") return drivers.map((d) => ({ id: d.id, label: d.name }));
+    return shops.map((s) => ({ id: s.id, label: s.name }));
   }
 
-  function ensureRow(shopId: string): StockRow {
-    const shop = shops.find((x) => x.id === shopId);
-    const existing = rows.find((r) => r.shopId === shopId);
-    if (existing) return existing;
+  const grouped = useMemo(() => {
+    // raggruppa: kind+id -> palletType -> qty
+    const map = new Map<string, { kind: StockLocationKind; id: string; byType: Record<string, number> }>();
 
-    const newRow: StockRow = {
-      shopId,
-      shopName: shop?.name ?? "—",
-      byType: {},
-      updatedAt: new Date().toLocaleString(),
-    };
-    const next = [newRow, ...rows];
-    persistRows(next);
-    return newRow;
-  }
-
-  function applyDelta() {
-    if (!shops.length) return alert("Crea prima almeno 1 negozio in /shops");
-    if (!selShopId) return alert("Seleziona un negozio.");
-    if (!selType) return alert("Seleziona un tipo.");
-
-    const d = Number(delta);
-    if (!Number.isFinite(d) || d === 0) return alert("Inserisci una quantità valida (diversa da 0).");
-
-    const shop = shops.find((x) => x.id === selShopId);
-    const row = ensureRow(selShopId);
-
-    const current = row.byType?.[selType] ?? 0;
-    const nextValue = current + d;
-    if (nextValue < 0) return alert("Non puoi andare sotto 0.");
-
-    const now = new Date().toLocaleString();
-
-    const nextRows = rows.map((r) => {
-      if (r.shopId !== selShopId) return r;
-      return {
-        ...r,
-        shopName: shop?.name ?? r.shopName,
-        byType: { ...(r.byType || {}), [selType]: nextValue },
-        updatedAt: now,
-      };
-    });
-
-    // se la riga non esisteva, rows potrebbe non includerla ancora nello stato (perché ensureRow ha persistito)
-    // ricarico base sicura:
-    const baseRows = safeParse<StockRow[]>(localStorage.getItem(STORAGE_STOCK), nextRows);
-    const fixedRows = baseRows.map((r) => {
-      if (r.shopId !== selShopId) return r;
-      return {
-        ...r,
-        shopName: shop?.name ?? r.shopName,
-        byType: { ...(r.byType || {}), [selType]: nextValue },
-        updatedAt: now,
-      };
-    });
-    persistRows(fixedRows);
-
-    const mv: StockMove = {
-      id: uid(),
-      ts: now,
-      shopId: selShopId,
-      shopName: shop?.name ?? "—",
-      type: selType,
-      delta: d,
-      note: note.trim() || undefined,
-    };
-    persistMoves([mv, ...moves]);
-
-    setNote("");
-    alert("✅ Giacenza aggiornata!");
-  }
-
-  function resetAllStock() {
-    if (!confirm("Svuotare tutte le giacenze e lo storico movimenti stock?")) return;
-    localStorage.removeItem(STORAGE_STOCK);
-    localStorage.removeItem(STORAGE_STOCK_MOVES);
-    setRows([]);
-    setMoves([]);
-  }
-
-  function exportCSV() {
-    const csv = toCSV(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `stock_negozi_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  const filteredRows = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter((r) => {
-      const hay = `${r.shopName} ${r.shopId} ${Object.entries(r.byType || {}).map(([k, v]) => `${k}:${v}`).join(" ")}`.toLowerCase();
-      return hay.includes(s);
-    });
-  }, [rows, q]);
-
-  const totals = useMemo(() => {
-    const totalByType: Record<string, number> = {};
     for (const r of rows) {
-      for (const [t, v] of Object.entries(r.byType || {})) {
-        totalByType[t] = (totalByType[t] || 0) + (Number(v) || 0);
-      }
+      const key = `${r.locationKind}::${r.locationId}`;
+      if (!map.has(key)) map.set(key, { kind: r.locationKind, id: r.locationId, byType: {} });
+      map.get(key)!.byType[r.palletType] = (map.get(key)!.byType[r.palletType] || 0) + (r.qty || 0);
     }
-    return totalByType;
+
+    return Array.from(map.values());
   }, [rows]);
 
-  const inputStyle: React.CSSProperties = {
+  function addMove() {
+    setMsg("");
+
+    const qn = Number(qty);
+    if (!Number.isFinite(qn) || qn <= 0) return alert("Quantità non valida.");
+    if (!palletType) return alert("Seleziona il tipo pedana.");
+
+    if (!fromId) return alert("Seleziona il FROM.");
+    if (!toId) return alert("Seleziona il TO.");
+
+    try {
+      addStockMove({
+        palletType,
+        qty: qn,
+        from: { kind: fromKind, id: fromId },
+        to: { kind: toKind, id: toId },
+        note: note.trim() || undefined,
+      });
+
+      setNote("");
+      setQty(1);
+      reload();
+      setMsg("✅ Movimento registrato.");
+    } catch (e: any) {
+      alert("Errore movimento: " + (e?.message || "sconosciuto"));
+    }
+  }
+
+  function exportStockCsv() {
+    const flat: any[][] = [];
+    for (const g of grouped) {
+      const loc = `${g.kind}:${nameOf(g.kind, g.id)}`;
+      for (const [t, q] of Object.entries(g.byType)) {
+        flat.push([g.kind, g.id, nameOf(g.kind, g.id), t, q]);
+      }
+    }
+    downloadCsv("stock_giacenze.csv", ["locationKind", "locationId", "locationName", "palletType", "qty"], flat);
+  }
+
+  function exportMovesCsv() {
+    downloadCsv(
+      "stock_movimenti.csv",
+      ["ts", "palletType", "qty", "fromKind", "fromId", "fromName", "toKind", "toId", "toName", "note"],
+      moves.map((m) => [
+        new Date(m.ts).toISOString(),
+        m.palletType,
+        m.qty,
+        m.from.kind,
+        m.from.id,
+        nameOf(m.from.kind, m.from.id),
+        m.to.kind,
+        m.to.id,
+        nameOf(m.to.kind, m.to.id),
+        m.note || "",
+      ])
+    );
+  }
+
+  const card: React.CSSProperties = {
+    background: "white",
+    border: "1px solid #e9e9e9",
+    borderRadius: 16,
+    padding: 14,
+    boxShadow: "0 6px 18px rgba(0,0,0,0.05)",
+  };
+
+  const input: React.CSSProperties = {
     padding: 12,
     borderRadius: 12,
     border: "1px solid #ddd",
     width: "100%",
-    fontSize: 16,
-    background: "white",
+    fontWeight: 700,
   };
 
-  const btn = (bg: string) => ({
+  const btn = (bg: string, color = "white") => ({
     padding: "12px 14px",
-    borderRadius: 12,
+    borderRadius: 14,
     border: "none",
     fontWeight: 900 as const,
     cursor: "pointer",
     background: bg,
-    color: "white",
+    color,
   });
-
-  const card: React.CSSProperties = {
-    border: "1px solid #eee",
-    borderRadius: 16,
-    padding: 14,
-    background: "white",
-  };
 
   return (
     <div style={{ padding: 16, maxWidth: 980, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>📦 Giacenze per Negozio</h1>
-      <div style={{ opacity: 0.85, marginBottom: 14 }}>
-        Gestione quantità per tipo (EPAL/CHEP/LPR/DUSS/IFCO...). Export CSV e storico movimenti stock.
+      <h1 style={{ fontSize: 28, marginBottom: 6 }}>📦 Giacenze (Stock)</h1>
+      <div style={{ opacity: 0.85, fontWeight: 700 }}>
+        Registra movimenti “Da → A” e controlla le giacenze per deposito/negozio/autista.
       </div>
 
-      {/* Azioni */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-        <a
-          href="/"
-          style={{ ...btn("#0b1220"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-        >
-          ← Home
-        </a>
-        <a
-          href="/shops"
-          style={{ ...btn("#1b9a4a"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-        >
-          🏪 Negozi
-        </a>
-        <button style={btn("#6a1b9a")} onClick={exportCSV} disabled={rows.length === 0}>
-          ⬇️ Export CSV
-        </button>
-        <button style={btn("#e53935")} onClick={resetAllStock}>
-          🗑️ Reset Stock
-        </button>
-      </div>
+      {/* MOVIMENTO */}
+      <div style={{ ...card, marginTop: 14 }}>
+        <h2 style={{ marginTop: 0 }}>🔁 Registra movimento Stock</h2>
 
-      {/* Pannello aggiornamento */}
-      <div style={{ ...card, marginBottom: 12 }}>
-        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>➕ / ➖ Aggiorna giacenza</div>
-
-        <div style={{ display: "grid", gap: 10 }}>
-          <select style={inputStyle} value={selShopId} onChange={(e) => setSelShopId(e.target.value)}>
-            {shops.length === 0 ? (
-              <option value="">Nessun negozio</option>
-            ) : (
-              shops.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} — {s.address}
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr 1fr" }}>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Tipo pedana</div>
+            <select value={palletType} onChange={(e) => setPalletType(e.target.value)} style={input as any}>
+              {PALLET_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
                 </option>
-              ))
-            )}
-          </select>
+              ))}
+            </select>
+          </div>
 
-          <select style={inputStyle} value={selType} onChange={(e) => setSelType(e.target.value)}>
-            {types.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Quantità</div>
+            <input
+              type="number"
+              value={qty}
+              min={1}
+              onChange={(e) => setQty(Number(e.target.value))}
+              style={input}
+              inputMode="numeric"
+            />
+          </div>
 
-          <input
-            style={inputStyle}
-            type="number"
-            value={delta}
-            onChange={(e) => setDelta(Number(e.target.value))}
-            placeholder="Quantità: usa + per carico, - per scarico (es. 10 / -5)"
-          />
-
-          <input style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (opzionale) es. consegna / ritiro / reso" />
-
-          <button style={btn("#2e7d32")} onClick={applyDelta}>
-            ✅ Applica variazione
-          </button>
-
-          <div style={{ fontSize: 13, opacity: 0.75 }}>
-            Suggerimento: per scaricare usa valori negativi (es. <b>-5</b>).
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Note</div>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Facoltative" style={input} />
           </div>
         </div>
-      </div>
 
-      {/* Ricerca */}
-      <div style={{ marginBottom: 12 }}>
-        <input style={inputStyle} value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎 Cerca negozio o tipo (es. CHEP / IFCO / Conad)" />
-      </div>
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" , marginTop: 10}}>
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>DA (FROM)</div>
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+              <select value={fromKind} onChange={(e) => setFromKind(e.target.value as any)} style={input as any}>
+                <option value="DEPOSITO">Deposito</option>
+                <option value="NEGOZIO">Negozio</option>
+                <option value="AUTISTA">Autista</option>
+              </select>
 
-      {/* Totali */}
-      <div style={{ ...card, marginBottom: 12 }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>Totali (tutti i negozi)</div>
-        {Object.keys(totals).length === 0 ? (
-          <div style={{ opacity: 0.75 }}>Nessun totale (nessuna giacenza inserita).</div>
-        ) : (
-          <div style={{ display: "grid", gap: 6 }}>
-            {Object.entries(totals)
-              .sort((a, b) => a[0].localeCompare(b[0]))
-              .map(([t, v]) => (
-                <div key={t}>
-                  <b>{t}:</b> {v}
-                </div>
-              ))}
-          </div>
-        )}
-      </div>
-
-      {/* Tabelle per negozio */}
-      <div style={{ display: "grid", gap: 12 }}>
-        {filteredRows.length === 0 ? (
-          <div style={{ opacity: 0.8 }}>Nessuna giacenza presente.</div>
-        ) : (
-          filteredRows.map((r) => (
-            <div key={r.shopId} style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontWeight: 900, fontSize: 18 }}>{r.shopName}</div>
-                  <div style={{ opacity: 0.75, fontSize: 13 }}>Aggiornato: {r.updatedAt}</div>
-                </div>
-                <div style={{ opacity: 0.8, fontWeight: 800 }}>ID: {r.shopId}</div>
-              </div>
-
-              <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
-                {Object.keys(r.byType || {}).length === 0 ? (
-                  <div style={{ opacity: 0.75 }}>Nessuna giacenza inserita per questo negozio.</div>
+              <select value={fromId} onChange={(e) => setFromId(e.target.value)} style={input as any}>
+                {optionsFor(fromKind).length === 0 ? (
+                  <option value="">(Nessuna voce)</option>
                 ) : (
-                  Object.entries(r.byType)
-                    .sort((a, b) => a[0].localeCompare(b[0]))
-                    .map(([t, v]) => (
-                      <div key={t} style={{ display: "flex", justifyContent: "space-between" }}>
-                        <div><b>{t}</b></div>
-                        <div style={{ fontWeight: 900 }}>{v}</div>
-                      </div>
-                    ))
+                  optionsFor(fromKind).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))
                 )}
-              </div>
+              </select>
             </div>
-          ))
-        )}
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>A (TO)</div>
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+              <select value={toKind} onChange={(e) => setToKind(e.target.value as any)} style={input as any}>
+                <option value="DEPOSITO">Deposito</option>
+                <option value="NEGOZIO">Negozio</option>
+                <option value="AUTISTA">Autista</option>
+              </select>
+
+              <select value={toId} onChange={(e) => setToId(e.target.value)} style={input as any}>
+                {optionsFor(toKind).length === 0 ? (
+                  <option value="">(Nessuna voce)</option>
+                ) : (
+                  optionsFor(toKind).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+          <button onClick={addMove} style={btn("#1e88e5")}>
+            Registra movimento
+          </button>
+
+          <button onClick={exportStockCsv} style={btn("#2e7d32")}>
+            ⬇️ Export Giacenze CSV
+          </button>
+
+          <button onClick={exportMovesCsv} style={btn("#6a1b9a")}>
+            ⬇️ Export Movimenti CSV
+          </button>
+        </div>
+
+        {msg ? (
+          <div style={{ marginTop: 10, fontWeight: 900, color: msg.includes("✅") ? "#2e7d32" : "#c62828" }}>
+            {msg}
+          </div>
+        ) : null}
       </div>
 
-      {/* Storico movimenti stock */}
-      <div style={{ marginTop: 18, ...card }}>
-        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>🧾 Storico movimenti Stock</div>
+      {/* GIACENZE */}
+      <div style={{ ...card, marginTop: 14 }}>
+        <h2 style={{ marginTop: 0 }}>📦 Giacenze attuali</h2>
 
-        {moves.length === 0 ? (
-          <div style={{ opacity: 0.75 }}>Nessun movimento stock registrato.</div>
+        {grouped.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Nessuna giacenza registrata (fai un movimento).</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {moves.slice(0, 40).map((m) => (
-              <div key={m.id} style={{ paddingBottom: 10, borderBottom: "1px solid #f0f0f0" }}>
-                <div style={{ fontWeight: 900 }}>
-                  {m.delta > 0 ? "➕" : "➖"} {m.delta} • {m.type}
+            {grouped.map((g) => (
+              <div key={`${g.kind}::${g.id}`} style={{ border: "1px solid #eee", borderRadius: 14, padding: 12 }}>
+                <div style={{ fontWeight: 900, fontSize: 18 }}>
+                  {g.kind === "DEPOSITO" ? "🏭" : g.kind === "NEGOZIO" ? "🏪" : "🚚"}{" "}
+                  {nameOf(g.kind, g.id)}
                 </div>
-                <div style={{ opacity: 0.9 }}>
-                  🏪 {m.shopName} • 🕒 {m.ts}
-                  {m.note ? ` • Note: ${m.note}` : ""}
+
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  {Object.entries(g.byType).map(([t, q]) => (
+                    <div key={t} style={{ display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
+                      <div>{t}</div>
+                      <div>{q}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
+                  ID: {g.id}
                 </div>
               </div>
             ))}
-            {moves.length > 40 ? <div style={{ opacity: 0.7 }}>Mostrati ultimi 40 movimenti.</div> : null}
           </div>
         )}
+      </div>
+
+      {/* MOVIMENTI */}
+      <div style={{ ...card, marginTop: 14 }}>
+        <h2 style={{ marginTop: 0 }}>🧾 Storico movimenti Stock</h2>
+
+        {moves.length === 0 ? (
+          <div style={{ opacity: 0.8 }}>Nessun movimento registrato.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {moves.slice(0, 50).map((m) => (
+              <div key={m.id} style={{ border: "1px solid #eee", borderRadius: 14, padding: 12 }}>
+                <div style={{ fontWeight: 900 }}>
+                  {m.palletType} • Qty {m.qty}
+                </div>
+                <div style={{ marginTop: 6, fontWeight: 800, opacity: 0.85 }}>
+                  Da: {m.from.kind} / {nameOf(m.from.kind, m.from.id)} → A: {m.to.kind} / {nameOf(m.to.kind, m.to.id)}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                  {new Date(m.ts).toLocaleString()} {m.note ? ` • Note: ${m.note}` : ""}
+                </div>
+              </div>
+            ))}
+            {moves.length > 50 ? <div style={{ opacity: 0.7 }}>Mostrati ultimi 50.</div> : null}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <a href="/" style={{ fontWeight: 900, textDecoration: "none" }}>
+          ← Torna alla Home
+        </a>
       </div>
     </div>
   );
-  }
+}
