@@ -14,8 +14,6 @@ export type ScanEvent = {
   lng?: number;
   accuracy?: number;
   source: "qr" | "manual";
-
-  // nuovo: dove l’ho dichiarata dopo scansione (facoltativo)
   declaredKind?: StockLocationKind;
   declaredId?: string;
   palletType?: string;
@@ -28,13 +26,10 @@ export type PalletItem = {
   altCode?: string;
   type?: string;
   notes?: string;
-
   lastSeenTs?: number;
   lastLat?: number;
   lastLng?: number;
   lastSource?: "qr" | "manual";
-
-  // nuovo: ultima posizione “logistica” dichiarata
   lastLocKind?: StockLocationKind;
   lastLocId?: string;
 };
@@ -187,9 +182,7 @@ export function findPalletByCode(code: string): PalletItem | null {
   const c = (code || "").trim().toLowerCase();
   if (!c) return null;
   const items = getPallets();
-  return (
-    items.find((p) => p.code.toLowerCase() === c || (p.altCode || "").toLowerCase() === c) || null
-  );
+  return items.find((p) => p.code.toLowerCase() === c || (p.altCode || "").toLowerCase() === c) || null;
 }
 
 export function upsertPallet(update: Partial<PalletItem> & { code: string }) {
@@ -295,7 +288,7 @@ export function removeShop(id: string) {
 }
 
 /* ============================
-   DEPOTS (default always)
+   DEPOTS (default)
 ============================ */
 
 const DEFAULT_DEPOT_ID = "dep_default";
@@ -373,17 +366,15 @@ export function addStockMove(input: Omit<StockMove, "id" | "ts"> & { ts?: number
 }
 
 /* ============================
-   HELPERS: Scan -> Stock
+   HELPERS Scan -> Stock
 ============================ */
 
-// Se la pedana non ha lastLoc, considero che parta dal Deposito Principale
 export function getLastKnownLocForPallet(code: string): { kind: StockLocationKind; id: string } {
   const p = findPalletByCode(code);
   if (p?.lastLocKind && p?.lastLocId) return { kind: p.lastLocKind, id: p.lastLocId };
   return { kind: "DEPOSITO", id: DEFAULT_DEPOT_ID };
 }
 
-// Aggiorna posizione pedana + crea movimento stock
 export function movePalletViaScan(params: {
   code: string;
   palletType: string;
@@ -395,7 +386,6 @@ export function movePalletViaScan(params: {
   const from = getLastKnownLocForPallet(params.code);
   const to = { kind: params.toKind, id: params.toId };
 
-  // movimento stock
   addStockMove({
     palletType: params.palletType,
     qty: params.qty,
@@ -404,7 +394,6 @@ export function movePalletViaScan(params: {
     note: params.note,
   });
 
-  // aggiorna pallet lastLoc
   upsertPallet({
     code: params.code,
     type: params.palletType,
