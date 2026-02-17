@@ -74,10 +74,12 @@ export default function HomePage() {
 
       <div style={cardStyle}>
         <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>
-          🔥 Funzioni principali attive:
+          🔥 Funzioni principali:
         </div>
         <div style={{ lineHeight: 1.6 }}>
           ✅ Scansione QR pedana
+          <br />
+          ✅ Inserimento manuale se QR rovinato
           <br />
           ✅ Salvataggio posizione GPS
           <br />
@@ -86,8 +88,6 @@ export default function HomePage() {
           ✅ Giacenze per negozio + storico movimenti stock + Export CSV
           <br />
           ✅ Storico scansioni + Export CSV
-          <br />
-          ✅ Pedane mancanti (fuori deposito da X giorni) + Export CSV
         </div>
       </div>
     </div>
