@@ -1,436 +1,345 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Html5Qrcode, Html5QrcodeScannerState } from "html5-qrcode";
-import Link from "next/link";
 import {
   getDefaultDepot,
+  getDefaultShop,
+  getDepotOptions,
+  getDrivers,
   getShopOptions,
   movePalletViaScan,
-  setLastScan,
-  StockLocationKind,
+  type PalletType,
+  type StockLocationKind,
 } from "../lib/storage";
 
 type Camera = { id: string; label: string };
 
-const PALLET_TYPES = ["EUR/EPAL", "CHEP", "LPR", "IFCO", "ALTRO"] as const;
+const PALLET_TYPES: PalletType[] = ["EUR/EPAL", "CHEP", "LPR", "IFCO", "CP", "ALTRO"];
 
 export default function ScanPage() {
-  const readerId = "qr-reader";
-  const qrRef = useRef<Html5Qrcode | null>(null);
+  const [lastCode, setLastCode] = useState<string>("");
+  const [manualCode, setManualCode] = useState<string>("");
 
-  const [cameras, setCameras] = useState<Camera[]>([]);
-  const [cameraId, setCameraId] = useState<string>("");
-
-  const [status, setStatus] = useState<string>("📷 Inquadra il QR della pedana");
-  const [lastResult, setLastResult] = useState<string>("");
-
-  const [isRunning, setIsRunning] = useState<boolean>(false);
-
-  // form aggiornamento stock/posizione
-  const [palletType, setPalletType] = useState<string>("EUR/EPAL");
+  const [palletType, setPalletType] = useState<PalletType>("EUR/EPAL");
   const [qty, setQty] = useState<number>(1);
 
   const [locKind, setLocKind] = useState<StockLocationKind>("shop");
   const [locId, setLocId] = useState<string>("");
 
   const [note, setNote] = useState<string>("");
-  const [altCode, setAltCode] = useState<string>("");
 
-  const [manualCode, setManualCode] = useState<string>("");
+  const [cameras, setCameras] = useState<Camera[]>([]);
+  const [cameraId, setCameraId] = useState<string>("");
 
-  const config = useMemo(
-    () => ({
-      fps: 12,
-      qrbox: { width: 280, height: 280 },
-      aspectRatio: 1.0,
-      disableFlip: false,
-    }),
-    []
-  );
+  const scannerRef = useRef<any>(null);
+  const divId = "qr-reader";
 
-  function getGps(): Promise<{ lat?: number; lng?: number }> {
-    return new Promise((resolve) => {
-      if (typeof navigator === "undefined" || !navigator.geolocation) return resolve({});
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => resolve({}),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    });
-  }
+  const shopOptions = useMemo(() => getShopOptions(), []);
+  const depotOptions = useMemo(() => getDepotOptions(), []);
+  const driverOptions = useMemo(() => getDrivers().filter((d) => d.active !== false).map((d) => ({ id: d.id, label: d.name })), []);
 
-  async function loadCameras() {
-    try {
-      const devices = await Html5Qrcode.getCameras();
-      const list = (devices || []).map((d) => ({
-        id: d.id,
-        label: d.label || `Camera ${d.id.slice(0, 6)}`,
-      }));
-      setCameras(list);
+  const styles = useMemo(() => {
+    const box = (border: string, bg: string) =>
+      ({
+        marginTop: 14,
+        padding: 14,
+        borderRadius: 18,
+        border: `3px solid ${border}`,
+        background: bg,
+      } as const);
 
-      const back = list.find((c) => /back|rear|posteriore|environment/i.test(c.label));
-      setCameraId((prev) => prev || back?.id || list[0]?.id || "");
-    } catch (e: any) {
-      setStatus("❌ Permesso fotocamera negato o nessuna camera trovata.");
-      console.error(e);
-    }
-  }
+    const input = {
+      width: "100%",
+      padding: 12,
+      borderRadius: 12,
+      border: "1px solid #ddd",
+      fontSize: 16,
+      outline: "none",
+    } as const;
 
-  function ensureDefaultLocation() {
-    const { shops, depots, drivers } = getShopOptions();
-    if (locKind === "shop") {
-      if (!locId) setLocId(shops[0]?.id || "");
-    } else if (locKind === "depot") {
-      if (!locId) setLocId(depots[0]?.id || getDefaultDepot() || "");
-    } else {
-      if (!locId) setLocId(drivers[0]?.id || "");
-    }
-  }
+    const btn = (bg: string) =>
+      ({
+        padding: "14px 16px",
+        borderRadius: 14,
+        border: "none",
+        fontWeight: 900,
+        cursor: "pointer",
+        background: bg,
+        color: "white",
+      } as const);
 
-  async function start() {
-    if (!cameraId) {
-      setStatus("⚠️ Nessuna camera selezionata.");
-      return;
-    }
-
-    try {
-      if (!qrRef.current) qrRef.current = new Html5Qrcode(readerId);
-
-      const state = qrRef.current.getState?.();
-      if (state === Html5QrcodeScannerState.SCANNING) return;
-
-      setStatus("🔎 Scansione in corso...");
-      await qrRef.current.start(
-        { deviceId: { exact: cameraId } },
-        config,
-        async (decodedText) => {
-          setLastResult(decodedText);
-          setLastScan(decodedText);
-          setStatus(`✅ QR letto correttamente!`);
-          await stop().catch(() => {});
-        },
-        () => {}
-      );
-
-      setIsRunning(true);
-    } catch (e: any) {
-      console.error(e);
-
-      try {
-        setStatus("⚠️ Riprovo con camera posteriore...");
-        await qrRef.current?.start(
-          { facingMode: "environment" },
-          config,
-          async (decodedText) => {
-            setLastResult(decodedText);
-            setLastScan(decodedText);
-            setStatus(`✅ QR letto correttamente!`);
-            await stop().catch(() => {});
-          },
-          () => {}
-        );
-        setIsRunning(true);
-      } catch (e2: any) {
-        console.error(e2);
-        setStatus("❌ Impossibile avviare la fotocamera (prova Chrome, permessi, o altra camera).");
-        setIsRunning(false);
-      }
-    }
-  }
-
-  async function stop() {
-    try {
-      if (!qrRef.current) return;
-      const state = qrRef.current.getState?.();
-      if (state === Html5QrcodeScannerState.NOT_STARTED) return;
-
-      await qrRef.current.stop();
-      await qrRef.current.clear();
-      setIsRunning(false);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  function clearResult() {
-    setLastResult("");
-    setStatus("📷 Inquadra il QR della pedana");
-  }
-
-  async function saveUpdate(source: "qr" | "manual") {
-    const code = (source === "qr" ? lastResult : manualCode).trim();
-    if (!code) {
-      setStatus("⚠️ Inserisci/leggi prima un codice pedana.");
-      return;
-    }
-
-    ensureDefaultLocation();
-
-    const gps = await getGps();
-
-    movePalletViaScan({
-      code,
-      source,
-      lat: gps.lat,
-      lng: gps.lng,
-      palletType,
-      qty,
-      locationKind: locKind,
-      locationId: locId || undefined,
-      note: note || undefined,
-      altCode: altCode || undefined,
-    });
-
-    setStatus("✅ Salvato aggiornamento (posizione + stock + storico).");
-  }
-
-  useEffect(() => {
-    loadCameras();
-    ensureDefaultLocation();
-    return () => {
-      stop().catch(() => {});
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return { box, input, btn };
   }, []);
 
+  // default location
   useEffect(() => {
-    ensureDefaultLocation();
+    if (locKind === "shop") {
+      const def = getDefaultShop();
+      if (def && !locId) setLocId(def);
+    }
+    if (locKind === "depot") {
+      const def = getDefaultDepot();
+      if (def && !locId) setLocId(def);
+    }
+    if (locKind === "driver") {
+      if (!locId && driverOptions.length) setLocId(driverOptions[0].id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locKind]);
 
-  const { shops, depots, drivers } = getShopOptions();
-  const locationList = locKind === "shop" ? shops : locKind === "depot" ? depots : drivers;
+  // list cameras + start scanner
+  useEffect(() => {
+    let mounted = true;
 
-  const card: React.CSSProperties = {
-    borderRadius: 16,
-    padding: 14,
-    border: "2px solid #ddd",
-    background: "white",
-    marginBottom: 14,
-  };
+    async function init() {
+      try {
+        const mod = await import("html5-qrcode");
+        const { Html5Qrcode } = mod as any;
 
-  const btn: React.CSSProperties = {
-    padding: "12px 14px",
-    borderRadius: 14,
-    border: "none",
-    fontWeight: 800,
-    cursor: "pointer",
-  };
+        // cameras
+        const devices = await Html5Qrcode.getCameras();
+        if (!mounted) return;
+
+        const cams: Camera[] = devices.map((d: any) => ({ id: d.id, label: d.label || d.id }));
+        setCameras(cams);
+        setCameraId((prev) => prev || (cams[0]?.id ?? ""));
+
+        // start
+        if (!scannerRef.current) {
+          scannerRef.current = new Html5Qrcode(divId);
+        }
+
+        if (cams[0]?.id) {
+          await startScanner(scannerRef.current, prevCamIdOrFirst(prevCamIdFromState(), cams));
+        }
+      } catch (e) {
+        // se non parte, comunque l'inserimento manuale funziona
+        console.warn("QR init error", e);
+      }
+    }
+
+    init();
+
+    return () => {
+      mounted = false;
+      stopScanner();
+    };
+
+    function prevCamIdFromState() {
+      return cameraId;
+    }
+    function prevCamIdOrFirst(prev: string, cams: Camera[]) {
+      return prev || (cams[0]?.id ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function stopScanner() {
+    try {
+      if (scannerRef.current) {
+        const s = scannerRef.current;
+        const isScanning = s.getState ? s.getState() === 2 : true;
+        if (isScanning && s.stop) await s.stop();
+        if (s.clear) await s.clear();
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function startScanner(scanner: any, camId: string) {
+    try {
+      await stopScanner();
+      setLastCode("");
+
+      await scanner.start(
+        { deviceId: { exact: camId } },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText: string) => {
+          const code = (decodedText || "").trim();
+          if (!code) return;
+          setLastCode(code);
+        },
+        () => {}
+      );
+    } catch (e) {
+      console.warn("startScanner error", e);
+    }
+  }
+
+  async function changeCamera(id: string) {
+    setCameraId(id);
+    if (scannerRef.current) {
+      await startScanner(scannerRef.current, id);
+    }
+  }
+
+  function getLocationLabel(): string {
+    if (locKind === "shop") return shopOptions.find((x) => x.id === locId)?.label || "Negozio";
+    if (locKind === "depot") return depotOptions.find((x) => x.id === locId)?.label || "Deposito";
+    if (locKind === "driver") return driverOptions.find((x) => x.id === locId)?.label || "Autista";
+    return "Sconosciuto";
+  }
+
+  function save(code: string, mode: "scan" | "manual") {
+    const c = (code || "").trim();
+    if (!c) return alert("Codice pedana vuoto.");
+
+    const q = Number(qty);
+    if (!q || q < 1) return alert("Quantità non valida.");
+
+    // GPS (se disponibile)
+    const doMove = (lat?: number, lng?: number) => {
+      movePalletViaScan({
+        palletCode: c,
+        palletType,
+        qty: q,
+        mode,
+        locationKind: locKind,
+        locationId: locId || undefined,
+        locationLabel: getLocationLabel(),
+        lat,
+        lng,
+        notes: note.trim() || undefined,
+      });
+      alert("✅ Salvato!");
+      setNote("");
+    };
+
+    if (!navigator.geolocation) {
+      doMove();
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => doMove(pos.coords.latitude, pos.coords.longitude),
+      () => doMove(),
+      { enableHighAccuracy: true, timeout: 7000 }
+    );
+  }
 
   return (
-    <div style={{ padding: 16, maxWidth: 720, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8 }}>📷 Scanner QR Pedane</h1>
-      <p style={{ marginTop: 0, opacity: 0.85 }}>
-        Scansiona il QR della pedana. La posizione GPS verrà salvata automaticamente.
-      </p>
-
-      <div
-        style={{
-          padding: 12,
-          borderRadius: 12,
-          background: "#f2f2f2",
-          marginBottom: 12,
-          fontWeight: 700,
-        }}
-      >
-        Stato: {status}
+    <div style={{ padding: 16, maxWidth: 820, margin: "0 auto" }}>
+      <h1 style={{ margin: 0, fontSize: 32 }}>📷 Scansione QR Pedana</h1>
+      <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <a href="/" style={{ color: "#1e88e5", fontWeight: 800, textDecoration: "none" }}>← Home</a>
+        <a href="/history" style={{ color: "#6a1b9a", fontWeight: 900, textDecoration: "none" }}>📌 Apri Storico</a>
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <select
-          value={cameraId}
-          onChange={(e) => setCameraId(e.target.value)}
-          style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd", flex: "1 1 280px" }}
-          disabled={isRunning}
-        >
-          {cameras.length === 0 ? (
-            <option value="">Nessuna camera</option>
-          ) : (
-            cameras.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))
-          )}
-        </select>
-
-        <button
-          onClick={() => (isRunning ? stop() : start())}
-          style={{
-            ...btn,
-            background: isRunning ? "#e53935" : "#1e88e5",
-            color: "white",
-          }}
-        >
-          {isRunning ? "Ferma" : "Avvia"}
-        </button>
-
-        <button
-          onClick={clearResult}
-          style={{
-            ...btn,
-            border: "1px solid #ddd",
-            background: "white",
-          }}
-        >
-          Svuota
-        </button>
-      </div>
-
-      <div id={readerId} style={{ width: "100%", borderRadius: 16, overflow: "hidden", marginBottom: 14 }} />
-
-      {/* Manuale (QR rovinato) */}
-      <div style={{ ...card, borderColor: "#f1c27b", background: "#fff7e6" }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>🛟 QR rovinato? Inserimento manuale</div>
+      <div style={styles.box("#f7b24a", "#fff5e6")}>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>🛟 QR rovinato? Inserimento manuale</div>
         <input
           value={manualCode}
           onChange={(e) => setManualCode(e.target.value)}
           placeholder="Es: PEDANA-000123"
-          style={{
-            width: "100%",
-            padding: 12,
-            borderRadius: 12,
-            border: "2px solid #e6d3a3",
-            marginBottom: 10,
-            fontWeight: 800,
-          }}
+          style={styles.input}
         />
-        <button
-          onClick={() => saveUpdate("manual")}
-          style={{ ...btn, background: "#fb8c00", color: "white", width: "100%" }}
-        >
-          Salva manuale
-        </button>
+        <div style={{ marginTop: 10 }}>
+          <button onClick={() => save(manualCode, "manual")} style={styles.btn("#fb8c00")}>
+            Salva manuale
+          </button>
+        </div>
       </div>
 
-      {lastResult ? (
-        <div style={{ ...card, borderColor: "#2e7d32", background: "#eaf7ee" }}>
-          <div style={{ fontWeight: 900, marginBottom: 6 }}>✅ Pedana:</div>
-          <div style={{ fontSize: 34, fontWeight: 950 }}>{lastResult}</div>
+      <div style={styles.box("#2e7d32", "#eaf7ee")}>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>✅ Pedana:</div>
+        <div style={{ fontSize: 36, fontWeight: 1000, letterSpacing: 1 }}>
+          {lastCode ? lastCode : "—"}
         </div>
-      ) : null}
+      </div>
 
-      {/* Update posizione/stock */}
-      <div style={{ ...card, borderColor: "#1e88e5", background: "#eef6ff" }}>
-        <div style={{ fontWeight: 900, marginBottom: 10 }}>📦 Aggiorna posizione e Stock</div>
+      <div style={styles.box("#1e88e5", "#e9f4ff")}>
+        <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>📦 Aggiorna posizione e Stock</div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Tipo pedana</div>
-            <select
-              value={palletType}
-              onChange={(e) => setPalletType(e.target.value)}
-              style={{ width: "100%", padding: 12, borderRadius: 12, border: "2px solid #cfe2ff", fontWeight: 800 }}
-            >
-              {PALLET_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Tipo pedana</div>
+            <select value={palletType} onChange={(e) => setPalletType(e.target.value as PalletType)} style={styles.input}>
+              {PALLET_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
 
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Quantità</div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Quantità</div>
             <input
               type="number"
               value={qty}
-              onChange={(e) => setQty(Number(e.target.value || 1))}
+              onChange={(e) => setQty(Math.max(1, Number(e.target.value || 1)))}
+              style={styles.input}
               min={1}
-              style={{ width: "100%", padding: 12, borderRadius: 12, border: "2px solid #cfe2ff", fontWeight: 900 }}
             />
           </div>
 
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Dove si trova ORA?</div>
-            <select
-              value={locKind}
-              onChange={(e) => setLocKind(e.target.value as StockLocationKind)}
-              style={{ width: "100%", padding: 12, borderRadius: 12, border: "2px solid #cfe2ff", fontWeight: 800 }}
-            >
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Dove si trova ORA?</div>
+            <select value={locKind} onChange={(e) => { setLocKind(e.target.value as StockLocationKind); setLocId(""); }} style={styles.input}>
               <option value="shop">Negozio</option>
               <option value="depot">Deposito</option>
               <option value="driver">Autista</option>
+              <option value="unknown">Sconosciuto</option>
             </select>
           </div>
 
           <div>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Seleziona</div>
-            <select
-              value={locId}
-              onChange={(e) => setLocId(e.target.value)}
-              style={{ width: "100%", padding: 12, borderRadius: 12, border: "2px solid #cfe2ff", fontWeight: 800 }}
-            >
-              {locationList.length === 0 ? <option value="">(Nessuna voce)</option> : null}
-              {locationList.map((x: any) => (
-                <option key={x.id} value={x.id}>
-                  {x.name}
-                </option>
-              ))}
-            </select>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>Seleziona</div>
+
+            {locKind === "shop" ? (
+              <select value={locId} onChange={(e) => setLocId(e.target.value)} style={styles.input}>
+                <option value="">(Nessuna voce)</option>
+                {shopOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            ) : locKind === "depot" ? (
+              <select value={locId} onChange={(e) => setLocId(e.target.value)} style={styles.input}>
+                <option value="">(Nessuna voce)</option>
+                {depotOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            ) : locKind === "driver" ? (
+              <select value={locId} onChange={(e) => setLocId(e.target.value)} style={styles.input}>
+                <option value="">(Nessuna voce)</option>
+                {driverOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            ) : (
+              <input value="—" readOnly style={styles.input} />
+            )}
           </div>
         </div>
 
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Codice alternativo (opz.)</div>
-          <input
-            value={altCode}
-            onChange={(e) => setAltCode(e.target.value)}
-            placeholder="Facoltativo"
-            style={{ width: "100%", padding: 12, borderRadius: 12, border: "2px solid #cfe2ff", fontWeight: 800 }}
-          />
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>Note</div>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Facoltative" style={styles.input} />
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Note</div>
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Facoltative"
-            style={{ width: "100%", padding: 12, borderRadius: 12, border: "2px solid #cfe2ff", fontWeight: 800 }}
-          />
-        </div>
-
-        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-          <button
-            onClick={() => saveUpdate("qr")}
-            style={{ ...btn, background: "#2e7d32", color: "white", flex: 1 }}
-            disabled={!lastResult}
-          >
+        <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={() => save(lastCode, "scan")} style={styles.btn("#2e7d32")}>
             Salva aggiornamento
           </button>
-          <button
-            onClick={() => setStatus("⏭️ Ok, lo fai dopo.")}
-            style={{ ...btn, background: "#616161", color: "white", flex: 1 }}
-          >
+          <button onClick={() => setLastCode("")} style={styles.btn("#616161")}>
             Più tardi
           </button>
-        </div>
-
-        <div style={{ marginTop: 10 }}>
-          <Link
-            href="/stock"
-            style={{
-              display: "block",
-              textAlign: "center",
-              padding: "12px 14px",
-              borderRadius: 14,
-              fontWeight: 900,
-              background: "#6a1b9a",
-              color: "white",
-              textDecoration: "none",
-            }}
-          >
+          <a href="/stock" style={{ ...styles.btn("#6a1b9a"), textDecoration: "none", display: "inline-flex", alignItems: "center" }}>
             Apri Stock
-          </Link>
+          </a>
         </div>
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <Link href="/" style={{ textDecoration: "none", fontWeight: 900 }}>
-          ← Torna alla Home
-        </Link>
+      <div style={{ marginTop: 14, padding: 14, borderRadius: 18, border: "1px solid #e6e6e6", background: "white" }}>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>📷 Scanner QR</div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontWeight: 900 }}>Camera:</div>
+          <select value={cameraId} onChange={(e) => changeCamera(e.target.value)} style={{ padding: 10, borderRadius: 12, border: "1px solid #ddd" }}>
+            {cameras.length === 0 ? (
+              <option value="">(Nessuna camera)</option>
+            ) : (
+              cameras.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)
+            )}
+          </select>
+        </div>
+
+        <div id={divId} style={{ width: "100%", minHeight: 260 }} />
+        <div style={{ marginTop: 10, opacity: 0.75, fontSize: 13 }}>
+          Se su alcuni telefoni il QR “prende” male, usa l’inserimento manuale sopra.
+        </div>
       </div>
     </div>
   );
