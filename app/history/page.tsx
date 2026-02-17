@@ -1,159 +1,89 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-
-type HistoryItem = {
-  id: string;
-  pedanaCode: string;
-  ts: string;
-  lat?: number;
-  lng?: number;
-  accuracy?: number;
-  driverName?: string;
-  shopName?: string;
-  depotName?: string;
-};
-
-const STORAGE_HISTORY = "pallet_history";
-
-function safeParse<T>(raw: string | null, fallback: T): T {
-  try {
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function toCSV(rows: HistoryItem[]) {
-  const header = [
-    "id",
-    "timestamp",
-    "pedanaCode",
-    "lat",
-    "lng",
-    "accuracy",
-    "driverName",
-    "shopName",
-    "depotName",
-  ];
-
-  const esc = (v: any) => {
-    const s = v === undefined || v === null ? "" : String(v);
-    const needs = /[",\n;]/.test(s);
-    const out = s.replace(/"/g, '""');
-    return needs ? `"${out}"` : out;
-  };
-
-  const lines = [header.join(",")];
-  for (const r of rows) {
-    lines.push(
-      [
-        r.id,
-        r.ts,
-        r.pedanaCode,
-        r.lat ?? "",
-        r.lng ?? "",
-        r.accuracy ?? "",
-        r.driverName ?? "",
-        r.shopName ?? "",
-        r.depotName ?? "",
-      ].map(esc).join(",")
-    );
-  }
-  return lines.join("\n");
-}
+import React, { useMemo, useState } from "react";
+import { downloadCsv, getHistory, setHistory, formatDT } from "../lib/storage";
 
 export default function HistoryPage() {
-  const [items, setItems] = useState<HistoryItem[]>([]);
   const [q, setQ] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
-  useEffect(() => {
-    const saved = safeParse<HistoryItem[]>(localStorage.getItem(STORAGE_HISTORY), []);
-    setItems(saved);
-  }, []);
-
-  function refresh() {
-    const saved = safeParse<HistoryItem[]>(localStorage.getItem(STORAGE_HISTORY), []);
-    setItems(saved);
-  }
-
-  function clearAll() {
-    if (!confirm("Vuoi svuotare TUTTO lo storico?")) return;
-    localStorage.removeItem(STORAGE_HISTORY);
-    setItems([]);
-  }
-
-  function exportCSV() {
-    const csv = toCSV(items);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `pallet_history_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const list = useMemo(() => getHistory(), [refresh]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return items;
-    return items.filter((x) => {
-      const hay = `${x.pedanaCode} ${x.ts} ${x.driverName ?? ""} ${x.shopName ?? ""} ${x.depotName ?? ""} ${x.lat ?? ""} ${x.lng ?? ""}`.toLowerCase();
-      return hay.includes(s);
-    });
-  }, [items, q]);
+    if (!s) return list;
+    return list.filter((x) => `${x.code} ${x.palletType || ""} ${x.declaredKind || ""} ${x.declaredId || ""}`.toLowerCase().includes(s));
+  }, [list, q]);
 
-  const inputStyle = { padding: 12, borderRadius: 12, border: "1px solid #ddd", width: "100%", fontSize: 16 };
-  const btn = (bg: string) => ({ padding: "12px 14px", borderRadius: 12, border: "none", fontWeight: 900 as const, cursor: "pointer", background: bg, color: "white" });
+  function exportCsv() {
+    const rows = filtered.map((x) => [
+      x.code,
+      formatDT(x.ts),
+      x.source,
+      x.lat ?? "",
+      x.lng ?? "",
+      x.accuracy ?? "",
+      x.palletType ?? "",
+      x.qty ?? "",
+      x.declaredKind ?? "",
+      x.declaredId ?? "",
+      x.note ?? "",
+    ]);
+    downloadCsv(`storico_${new Date().toISOString().slice(0, 10)}.csv`, [
+      "code", "datetime", "source", "lat", "lng", "accuracy", "palletType", "qty", "kind", "refId", "note",
+    ], rows);
+  }
+
+  function clearAll() {
+    if (!confirm("Cancellare TUTTO lo storico?")) return;
+    setHistory([]);
+    setRefresh((x) => x + 1);
+  }
 
   return (
-    <div style={{ padding: 16, maxWidth: 900, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, marginBottom: 6 }}>📄 Storico Scansioni</h1>
-      <div style={{ opacity: 0.85, marginBottom: 14 }}>
-        Totale record: <b>{items.length}</b>
-      </div>
-
+    <div style={{ padding: 16, maxWidth: 980, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 28, marginBottom: 6 }}>📌 Storico scansioni</h1>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button style={btn("#6a1b9a")} onClick={exportCSV} disabled={items.length === 0}>
-          ⬇️ Export CSV
-        </button>
-        <button style={btn("#9e9e9e")} onClick={refresh}>
-          🔄 Aggiorna
-        </button>
-        <button style={btn("#e53935")} onClick={clearAll} disabled={items.length === 0}>
-          🗑️ Svuota
-        </button>
-        <a href="/scan" style={{ ...btn("#1565c0"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-          ← Torna a Scan
-        </a>
-        <a href="/" style={{ ...btn("#0b1220"), textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-          ← Home
-        </a>
+        <a href="/" style={link()}>← Home</a>
+        <button style={btn("#6a1b9a")} onClick={exportCsv}>Export CSV</button>
+        <button style={btn("#e53935")} onClick={clearAll}>Svuota</button>
+        <button style={btn("#455a64")} onClick={() => setRefresh((x) => x + 1)}>Aggiorna</button>
       </div>
 
-      <div style={{ marginTop: 12 }}>
-        <input style={inputStyle} value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔎 Cerca (codice, data, autista, negozio, deposito, lat/lng)" />
-      </div>
+      <input style={{ ...inp(), marginTop: 12 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca..." />
 
-      <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-        {filtered.length === 0 ? (
-          <div style={{ opacity: 0.8 }}>Nessun record nello storico.</div>
-        ) : (
-          filtered.map((x) => (
-            <div key={x.id} style={{ border: "1px solid #eee", borderRadius: 16, padding: 14, background: "white" }}>
-              <div style={{ fontWeight: 900, fontSize: 18 }}>{x.pedanaCode}</div>
-              <div style={{ marginTop: 6, opacity: 0.8 }}>🕒 {x.ts}</div>
-
-              <div style={{ marginTop: 8, lineHeight: 1.6 }}>
-                {x.driverName ? <>🚚 Autista: <b>{x.driverName}</b><br /></> : null}
-                {x.shopName ? <>🏪 Negozio: <b>{x.shopName}</b><br /></> : null}
-                {x.depotName ? <>🏭 Deposito: <b>{x.depotName}</b><br /></> : null}
-                📍 GPS: {x.lat ?? "-"}, {x.lng ?? "-"} {x.accuracy ? `(±${Math.round(x.accuracy)}m)` : ""}
-              </div>
-            </div>
-          ))
-        )}
+      <div style={{ marginTop: 12, overflowX: "auto", background: "white", border: "1px solid #eee", borderRadius: 14 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {["Codice", "Quando", "Fonte", "Tipo", "Q.tà", "GPS"].map((h) => (
+                <th key={h} style={th()}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((x) => (
+              <tr key={x.id}>
+                <td style={td()}><b>{x.code}</b></td>
+                <td style={td()}>{formatDT(x.ts)}</td>
+                <td style={td()}>{x.source}</td>
+                <td style={td()}>{x.palletType || "—"}</td>
+                <td style={td()}>{x.qty ?? "—"}</td>
+                <td style={td()}>{x.lat && x.lng ? `${x.lat.toFixed(5)}, ${x.lng.toFixed(5)}` : "—"}</td>
+              </tr>
+            ))}
+            {filtered.length === 0 ? (
+              <tr><td style={td()} colSpan={6}>Nessuna scansione.</td></tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 }
+
+const inp = (): React.CSSProperties => ({ padding: 12, borderRadius: 12, border: "1px solid #ddd", fontSize: 16, width: "100%" });
+const btn = (bg: string): React.CSSProperties => ({ padding: "12px 14px", borderRadius: 12, border: "none", background: bg, color: "white", fontWeight: 900, cursor: "pointer" });
+const th = (): React.CSSProperties => ({ textAlign: "left", padding: 10, borderBottom: "1px solid #eee", fontWeight: 900 });
+const td = (): React.CSSProperties => ({ padding: 10, borderBottom: "1px solid #f3f3f3" });
+const link = (): React.CSSProperties => ({ fontWeight: 900, textDecoration: "none", color: "#1e88e5", padding: "12px 0" });
