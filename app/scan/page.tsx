@@ -30,7 +30,7 @@ export default function ScanPage() {
 
   const [manualCode, setManualCode] = useState<string>("");
 
-  // form “Aggiorna posizione”
+  // update form
   const [showUpdate, setShowUpdate] = useState(false);
   const [palletType, setPalletType] = useState(PALLET_TYPES[0]);
   const [qty, setQty] = useState<number>(1);
@@ -129,13 +129,9 @@ export default function ScanPage() {
 
     setLastResult(clean);
     setStatus(source === "qr" ? "✅ QR letto correttamente!" : "✅ Salvato manualmente!");
-
     await persistBasicScan(clean, source);
 
-    // apro form per aggiornare stock/posizione
     setShowUpdate(true);
-
-    // default toId
     setToId((prev) => prev || ensureToId(toKind));
   }
 
@@ -219,7 +215,7 @@ export default function ScanPage() {
 
   async function saveManual() {
     const clean = manualCode.trim();
-    if !clean) {
+    if (!clean) {
       setStatus("⚠️ Inserisci un codice pedana.");
       return;
     }
@@ -245,7 +241,6 @@ export default function ScanPage() {
         note: note.trim() || undefined,
       });
 
-      // aggiorna anche nello storico scansioni (aggiungo un evento “ricco”)
       const gps = await getGps();
       addHistory({
         code: lastResult,
@@ -277,19 +272,10 @@ export default function ScanPage() {
   }, []);
 
   useEffect(() => {
-    // se cambio toKind e toId non è valido, setto il primo disponibile
     const opts = optionsFor(toKind);
     if (!opts.find((o) => o.id === toId)) setToId(opts[0]?.id || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toKind]);
-
-  const card = (bg: string, border: string) => ({
-    padding: 14,
-    borderRadius: 16,
-    background: bg,
-    border: `2px solid ${border}`,
-    marginTop: 12,
-  });
 
   const input = {
     padding: 12,
@@ -307,6 +293,14 @@ export default function ScanPage() {
     cursor: "pointer",
     background: bg,
     color: "white",
+  });
+
+  const card = (bg: string, border: string) => ({
+    padding: 14,
+    borderRadius: 16,
+    background: bg,
+    border: `2px solid ${border}`,
+    marginTop: 12,
   });
 
   return (
@@ -342,7 +336,7 @@ export default function ScanPage() {
           {isRunning ? "Ferma" : "Avvia"}
         </button>
 
-        <button onClick={clearAll} style={{ ...btn("#616161") }}>
+        <button onClick={clearAll} style={btn("#616161")}>
           Svuota
         </button>
       </div>
@@ -444,9 +438,6 @@ export default function ScanPage() {
       ) : null}
 
       <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <a href="/pallets" style={{ textDecoration: "none", fontWeight: 900 }}>
-          🧱 Registro Pedane
-        </a>
         <a href="/stock" style={{ textDecoration: "none", fontWeight: 900 }}>
           📦 Stock
         </a>
